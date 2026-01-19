@@ -20,7 +20,7 @@ This project is a clean build with:
 ### Character creation
 - Generate SillyTavern character fields from a free-text idea prompt
 - Optional name + POV selection
-- Fill missing fields after import (generate only what’s empty)
+- Fill missing fields after import (generate only what’s empty). Enter your thoughts in the Character Idea box to use that while updating.
 - Per-field regeneration (regenerate only what you want)
 
 ### Image generation
@@ -35,8 +35,8 @@ This project is a clean build with:
 - Import JSON or PNG cards back into the workspace
 
 ### Local character library
-- Choose a library folder (persisted)
-- Browse cards with thumbnails
+- Choose a library folder (persisted) I suggest you point to your Characters folder in SillyTavern! This is the easiest setup.
+- Browse cards with thumbnails and click to edit in the workspace.
 - Delete from library with confirmation (updates index)
 
 ---
