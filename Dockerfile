@@ -40,7 +40,7 @@ RUN apk add --no-cache libsecret
 WORKDIR /app
 
 # Set default port
-ENV PORT=3001
+ENV PORT=3000
 
 # Copy package files for production dependency installation
 COPY package*.json ./
@@ -56,7 +56,7 @@ COPY --from=builder /app/server/src ./server/src
 COPY --from=builder /app/server/package.json ./server/
 
 # Expose the server port
-EXPOSE 3001
+EXPOSE 3000
 
 # Start the server using tsx to run TypeScript directly
 CMD ["npx", "tsx", "server/src/index.ts"]
