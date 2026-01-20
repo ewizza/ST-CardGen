@@ -1,0 +1,55 @@
+name: Build and Publish Docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  release:
+    types: [published]
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/st-cardgen
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: compute-tags
+        run: |
+          tags="${IMAGE_NAME}:${GITHUB_SHA}"
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            tags+=",${IMAGE_NAME}:latest"
+          fi
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF#refs/tags/}"
+            tags+=",${IMAGE_NAME}:${version}"
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            release_tag="${GITHUB_EVENT_RELEASE_TAG_NAME:-${GITHUB_REF#refs/tags/}}"
+            tags+=",${IMAGE_NAME}:${release_tag}"
+          fi
+          echo "tags=$tags" >> $GITHUB_OUTPUT
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.compute-tags.outputs.tags }}
