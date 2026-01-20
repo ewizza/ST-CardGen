@@ -9,6 +9,11 @@ export const ConfigSchema = z.object({
     koboldcpp: z.object({
       baseUrl: z.string().default("http://127.0.0.1:5001"),
       model: z.string().optional(),
+      defaultParams: z.object({
+        temperature: z.number().optional(),
+        top_p: z.number().optional(),
+        max_tokens: z.number().int().min(128).max(8196).optional(),
+      }).default({ max_tokens: 896 }),
     }).default({}),
     openaiCompat: z.object({
       baseUrl: z.string().default("http://127.0.0.1:1234/v1"),

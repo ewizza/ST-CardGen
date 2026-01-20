@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 
@@ -69,6 +70,7 @@ const RegenerateSchema = z.object({
   requestedName: z.string().optional(),
   pov: z.enum(["first", "second", "third"]).default("third"),
   lorebook: z.string().optional(),
+  maxTokens: z.number().int().min(32).max(4096).optional(),
   card: z.object({
     name: z.string().optional(),
     description: z.string().optional(),
@@ -159,6 +161,31 @@ function filterPatchToTargets(patch: Record<string, any>, targets: string[]) {
     if (allow.has(key)) filtered[key] = value;
   }
   return filtered;
+}
+
+const makeNonce = () => crypto.randomUUID();
+
+function normalizeString(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeValue(value: any): any {
+  if (typeof value === "string") return normalizeString(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeValue(item));
+  }
+  if (value && typeof value === "object") {
+    const normalized: Record<string, any> = {};
+    for (const [key, child] of Object.entries(value)) {
+      normalized[key] = normalizeValue(child);
+    }
+    return normalized;
+  }
+  return value;
+}
+
+function equalNormalized(a: any, b: any) {
+  return JSON.stringify(normalizeValue(a)) === JSON.stringify(normalizeValue(b));
 }
 
 function defaultNegativePrompt(contentRating: "sfw" | "nsfw_allowed") {
@@ -309,37 +336,57 @@ characterRouter.post("/regenerate", async (req, res) => {
       return res.json({ ok: true, patch: {} });
     }
 
-    const prompt = buildRegeneratePrompt({
-      idea: body.idea,
-      requestedName: body.requestedName,
-      pov: body.pov,
-      lorebook: body.lorebook,
-      card: body.card,
-      targets,
-    });
-
-    const raw = await generateText("", prompt);
-    const parsed = tryParseJson(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return res.status(200).json({
-        ok: false,
-        error: "Invalid JSON from LLM",
-        raw: raw.slice(0, 8000),
+    let lastFiltered: Record<string, any> = {};
+    const maxTokens = body.maxTokens;
+    const regenParams = maxTokens ? { max_tokens: maxTokens } : undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const prompt = buildRegeneratePrompt({
+        idea: body.idea,
+        requestedName: body.requestedName,
+        pov: body.pov,
+        lorebook: body.lorebook,
+        card: body.card,
+        targets,
+        regenNonce: makeNonce(),
       });
+
+      const raw = await generateText("", prompt, regenParams);
+      const parsed = tryParseJson(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return res.status(200).json({
+          ok: false,
+          error: "Invalid JSON from LLM",
+          raw: raw.slice(0, 8000),
+        });
+      }
+
+      const validated = RegeneratePatchSchema.safeParse(parsed);
+      if (!validated.success) {
+        return res.status(200).json({
+          ok: false,
+          error: "LLM JSON did not match patch schema",
+          issues: validated.error.issues,
+          raw: raw.slice(0, 8000),
+        });
+      }
+
+      const filtered = filterPatchToTargets(validated.data, targets);
+      lastFiltered = filtered;
+      const anyDifferent = targets.some((key) => {
+        const existingValue = body.card[key];
+        const regenerated = filtered[key];
+        if (existingValue === undefined || existingValue === null) {
+          return !isMissingValue(regenerated);
+        }
+        return !equalNormalized(existingValue, regenerated);
+      });
+
+      if (anyDifferent) {
+        return res.json({ ok: true, patch: filtered });
+      }
     }
 
-    const validated = RegeneratePatchSchema.safeParse(parsed);
-    if (!validated.success) {
-      return res.status(200).json({
-        ok: false,
-        error: "LLM JSON did not match patch schema",
-        issues: validated.error.issues,
-        raw: raw.slice(0, 8000),
-      });
-    }
-
-    const filtered = filterPatchToTargets(validated.data, targets);
-    return res.json({ ok: true, patch: filtered });
+    return res.json({ ok: true, patch: lastFiltered });
   } catch (e: any) {
     return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
   }

@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+@layer base {
+  :root { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+
+  body {
+    @apply bg-zinc-50 text-zinc-900;
+  }
+  html.dark body {
+    @apply bg-zinc-950 text-zinc-100;
+  }
+}
+
+@layer components {
+  .regen-btn {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-lg border
+           border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  html.dark .regen-btn {
+    @apply border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800;
+  }
+  .card {
+    @apply rounded-xl border shadow-sm;
+    @apply border-zinc-200 bg-white;
+  }
+  html.dark .card {
+    @apply border-zinc-800 bg-zinc-900;
+  }
+
+  .card-h {
+    @apply px-4 py-3 border-b font-semibold;
+    @apply border-zinc-200;
+  }
+  html.dark .card-h {
+    @apply border-zinc-800;
+  }
+
+  .card-b { @apply p-4; }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium
+           transition active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-zinc-900 text-white hover:bg-zinc-800;
+  }
+  html.dark .btn-primary {
+    @apply bg-zinc-100 text-zinc-900 hover:bg-white;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium
+           transition active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-transparent hover:bg-zinc-100 text-zinc-900;
+  }
+  html.dark .btn-ghost {
+    @apply hover:bg-zinc-800 text-zinc-100;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium
+           transition active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-red-600 text-white hover:bg-red-500;
+  }
+
+  .input, .textarea, .select {
+    @apply w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2;
+    @apply border-zinc-300 bg-white text-zinc-900 placeholder:text-zinc-400 focus:ring-zinc-300 focus:border-zinc-400;
+  }
+  html.dark .input,
+  html.dark .textarea,
+  html.dark .select {
+    @apply border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 focus:ring-zinc-700 focus:border-zinc-600;
+  }
+
+  .textarea { @apply min-h-[120px] leading-relaxed; }
+
+  .label { @apply text-xs font-semibold uppercase tracking-wide text-zinc-600; }
+  html.dark .label { @apply text-zinc-400; }
+
+  .help { @apply text-xs text-zinc-600; }
+  html.dark .help { @apply text-zinc-400; }
+
+  .alert-error {
+    @apply rounded-lg border px-3 py-2 text-sm;
+    @apply border-red-200 bg-red-50 text-red-800;
+  }
+  html.dark .alert-error {
+    @apply border-red-900/50 bg-red-950/40 text-red-200;
+  }
+  
+  .pill {
+    @apply inline-flex items-center rounded-full border px-2 py-0.5 text-xs;
+    @apply border-zinc-200 bg-zinc-50 text-zinc-700;
+  }
+  html.dark .pill {
+    @apply border-zinc-800 bg-zinc-900 text-zinc-200;
+  }
+}

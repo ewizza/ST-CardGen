@@ -120,8 +120,14 @@ function ensureTextDefaults() {
   if (!cfg.config.text.koboldcpp) {
     cfg.config.text.koboldcpp = { baseUrl: "http://127.0.0.1:5001" };
   }
+  if (!cfg.config.text.koboldcpp.defaultParams) {
+    cfg.config.text.koboldcpp.defaultParams = { max_tokens: 896 };
+  }
   if (!cfg.config.text.openaiCompat) {
     cfg.config.text.openaiCompat = { baseUrl: "http://127.0.0.1:1234/v1" };
+  }
+  if (!cfg.config.text.openaiCompat.defaultParams) {
+    cfg.config.text.openaiCompat.defaultParams = {};
   }
   if (!cfg.config.text.googleGemini) {
     cfg.config.text.googleGemini = {
@@ -129,7 +135,49 @@ function ensureTextDefaults() {
       apiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
     };
   }
+  if (!cfg.config.text.googleGemini.defaultParams) {
+    cfg.config.text.googleGemini.defaultParams = {};
+  }
 }
+
+function getActiveDefaultParams(ensure: boolean) {
+  if (!cfg.config) return null;
+  if (textProvider.value === "openai_compat") {
+    if (ensure) cfg.config.text.openaiCompat.defaultParams ??= {};
+    return cfg.config.text.openaiCompat.defaultParams ?? null;
+  }
+  if (textProvider.value === "google_gemini") {
+    if (ensure) cfg.config.text.googleGemini.defaultParams ??= {};
+    return cfg.config.text.googleGemini.defaultParams ?? null;
+  }
+  if (ensure) cfg.config.text.koboldcpp.defaultParams ??= {};
+  return cfg.config.text.koboldcpp.defaultParams ?? null;
+}
+
+const textMaxTokensInput = computed({
+  get: () => {
+    const params = getActiveDefaultParams(false);
+    if (!params) return "";
+    const value = params.max_tokens;
+    return typeof value === "number" ? String(value) : "";
+  },
+  set: (value: string) => {
+    const params = getActiveDefaultParams(true);
+    if (!params) return;
+    const raw = String(value ?? "").trim();
+    if (!raw) {
+      params.max_tokens = undefined;
+      return;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) {
+      params.max_tokens = undefined;
+      return;
+    }
+    const clamped = Math.min(8196, Math.max(128, parsed));
+    params.max_tokens = clamped;
+  },
+});
 
 async function refreshTextModels() {
   modelsError.value = null;
@@ -278,6 +326,18 @@ async function onSaveContentRating() {
             {{ modelsLoading ? "Loading..." : "Refresh models" }}
           </button>
         </div>
+
+        <label class="field">
+          <span>Max Tokens</span>
+          <input
+            v-model="textMaxTokensInput"
+            type="number"
+            min="128"
+            max="8196"
+            step="1"
+            placeholder="(unset)"
+          />
+        </label>
 
         <div class="row">
           <button @click="pingText">Ping</button>

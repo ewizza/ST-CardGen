@@ -58,12 +58,30 @@ function migrateConfig(raw: any) {
       next.text.koboldcpp = { ...textDefaults.koboldcpp };
       changed = true;
     }
+    if (!next.text.koboldcpp.defaultParams || typeof next.text.koboldcpp.defaultParams !== "object") {
+      next.text.koboldcpp.defaultParams = { ...textDefaults.koboldcpp.defaultParams };
+      changed = true;
+    } else if (
+      next.text.koboldcpp.defaultParams.max_tokens === undefined &&
+      textDefaults.koboldcpp.defaultParams?.max_tokens !== undefined
+    ) {
+      next.text.koboldcpp.defaultParams.max_tokens = textDefaults.koboldcpp.defaultParams.max_tokens;
+      changed = true;
+    }
     if (!next.text.openaiCompat || typeof next.text.openaiCompat !== "object") {
       next.text.openaiCompat = { ...textDefaults.openaiCompat };
       changed = true;
     }
+    if (!next.text.openaiCompat.defaultParams || typeof next.text.openaiCompat.defaultParams !== "object") {
+      next.text.openaiCompat.defaultParams = { ...textDefaults.openaiCompat.defaultParams };
+      changed = true;
+    }
     if (!next.text.googleGemini || typeof next.text.googleGemini !== "object") {
       next.text.googleGemini = { ...textDefaults.googleGemini };
+      changed = true;
+    }
+    if (!next.text.googleGemini.defaultParams || typeof next.text.googleGemini.defaultParams !== "object") {
+      next.text.googleGemini.defaultParams = { ...textDefaults.googleGemini.defaultParams };
       changed = true;
     }
     if (typeof next.text.baseUrl === "string" && next.text.baseUrl.length) {

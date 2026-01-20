@@ -61,23 +61,28 @@ export async function koboldGenerateText(
   const cfg = loadConfig();
   const baseUrl = normalizeBaseUrl(cfg.text.koboldcpp?.baseUrl || "http://127.0.0.1:5001");
   const model = cfg.text.koboldcpp?.model;
+  const defaults = cfg.text.koboldcpp?.defaultParams ?? {};
   const timeoutMs = 60_000;
+
+  const temperature = params?.temperature ?? defaults.temperature;
+  const top_p = params?.top_p ?? defaults.top_p;
+  const max_tokens = params?.max_tokens ?? defaults.max_tokens;
 
   const chatBody: any = {
     messages: buildMessages(systemPrompt, userPrompt),
   };
   if (model) chatBody.model = model;
-  if (params?.temperature !== undefined) chatBody.temperature = params.temperature;
-  if (params?.top_p !== undefined) chatBody.top_p = params.top_p;
-  if (params?.max_tokens !== undefined) chatBody.max_tokens = params.max_tokens;
+  if (temperature !== undefined) chatBody.temperature = temperature;
+  if (top_p !== undefined) chatBody.top_p = top_p;
+  if (max_tokens !== undefined) chatBody.max_tokens = max_tokens;
 
   const chat = await postJson(`${baseUrl}/v1/chat/completions`, chatBody, timeoutMs);
   if (!chat.ok && (chat.status === 404 || chat.status === 405)) {
     const completionBody: any = { prompt: `${systemPrompt}\n\n${userPrompt}`.trim() };
     if (model) completionBody.model = model;
-    if (params?.temperature !== undefined) completionBody.temperature = params.temperature;
-    if (params?.top_p !== undefined) completionBody.top_p = params.top_p;
-    if (params?.max_tokens !== undefined) completionBody.max_tokens = params.max_tokens;
+    if (temperature !== undefined) completionBody.temperature = temperature;
+    if (top_p !== undefined) completionBody.top_p = top_p;
+    if (max_tokens !== undefined) completionBody.max_tokens = max_tokens;
     const completion = await postJson(`${baseUrl}/v1/completions`, completionBody, timeoutMs);
     if (!completion.ok) {
       const snippet = completion.text.slice(0, 500);

@@ -16,7 +16,7 @@ export type ImageProviderInfo = {
 export type AppConfig = {
   text: {
     provider: "koboldcpp" | "openai_compat" | "google_gemini";
-    koboldcpp: { baseUrl: string; model?: string };
+    koboldcpp: { baseUrl: string; model?: string; defaultParams?: { temperature?: number; top_p?: number; max_tokens?: number } };
     openaiCompat: {
       baseUrl: string;
       apiKeyRef?: string;

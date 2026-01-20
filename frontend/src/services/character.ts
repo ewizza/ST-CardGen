@@ -92,6 +92,7 @@ export type RegenerateRequest = {
   pov: "first" | "second" | "third";
   lorebook?: string;
   card: CharacterPayload;
+  maxTokens?: number;
   keep: {
     name: boolean;
     description: boolean;

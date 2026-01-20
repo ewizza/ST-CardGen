@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useLocalStorage } from "@vueuse/core";
 
@@ -63,6 +63,9 @@ const regenerating = ref(false);
 const error = ref<string | null>(null);
 const fillError = ref<string | null>(null);
 const regenError = ref<string | null>(null);
+const regenMaxTokensEnabled = ref(false);
+const regenMaxTokens = ref(512);
+const regenMaxTokensError = ref<string | null>(null);
 const errorRaw = ref<string | null>(null);
 const errorIssues = ref<any>(null);
 const imageError = ref<string | null>(null);
@@ -70,6 +73,7 @@ const libraryMessage = ref<string | null>(null);
 const showImageOverlay = ref(false);
 const showRegenModal = ref(false);
 const exportOpen = ref(false);
+const ideaEl = ref<HTMLTextAreaElement | null>(null);
 
 const issueText = computed(() =>
   errorIssues.value ? JSON.stringify(errorIssues.value, null, 2) : ""
@@ -170,10 +174,32 @@ function buildKeepAllTrue(): RegenKeep {
   };
 }
 
+function validateRegenMaxTokens(value: number) {
+  if (!Number.isFinite(value) || !Number.isInteger(value)) {
+    regenMaxTokensError.value = "Enter an integer between 32 and 4096.";
+    return false;
+  }
+  if (value < 32 || value > 4096) {
+    regenMaxTokensError.value = "Must be between 32 and 4096.";
+    return false;
+  }
+  regenMaxTokensError.value = null;
+  return true;
+}
+
+function clampRegenMaxTokens(value: number) {
+  if (!Number.isFinite(value)) return 512;
+  return Math.min(4096, Math.max(32, Math.trunc(value)));
+}
+
 async function runRegenerate(keep: RegenKeep, keepAvatar: boolean, requestedName?: string) {
   regenError.value = null;
   if (!idea.value.trim()) {
     regenError.value = "Character idea is required.";
+    nextTick(() => {
+      ideaEl.value?.focus();
+      ideaEl.value?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
     return;
   }
 
@@ -183,12 +209,19 @@ async function runRegenerate(keep: RegenKeep, keepAvatar: boolean, requestedName
 
   regenerating.value = true;
   try {
+    let maxTokens: number | undefined;
+    if (regenMaxTokensEnabled.value) {
+      if (!validateRegenMaxTokens(regenMaxTokens.value)) return;
+      maxTokens = clampRegenMaxTokens(regenMaxTokens.value);
+      regenMaxTokens.value = maxTokens;
+    }
     const res = await regenerateCharacter({
       idea: idea.value,
       requestedName,
       pov: pov.value,
       lorebook: lorebook.value.trim() || undefined,
       card: buildCardPayload(),
+      maxTokens,
       keep,
     });
 
@@ -671,127 +704,8 @@ onUnmounted(() => {
       </label>
     </div>
 
-    <div class="layout">
-      <div class="leftCol">
-        <CollapsiblePanel v-model="panels.inputs" title="Inputs">
-          <label class="field">
-            <span>Character idea</span>
-            <textarea v-model="idea" rows="4" placeholder="Describe the character concept..."></textarea>
-          </label>
-
-          <div class="grid-two">
-            <label class="field">
-              <span>Name (optional)</span>
-              <input v-model="ideaName" type="text" placeholder="Name (optional)" />
-            </label>
-
-            <label class="field">
-              <span>POV</span>
-              <select v-model="pov">
-                <option value="first">First person</option>
-                <option value="second">Second person</option>
-                <option value="third">Third person</option>
-              </select>
-            </label>
-          </div>
-
-          <details class="details">
-            <summary>Lorebook (optional)</summary>
-            <label class="field">
-              <span>Extra lore, world info, or constraints</span>
-              <textarea v-model="lorebook" rows="4" placeholder="Lorebook snippets..."></textarea>
-            </label>
-          </details>
-        </CollapsiblePanel>
-
-        <div :class="['fieldsPanelWrap', { grow: panels.fields }]">
-          <CollapsiblePanel v-model="panels.fields" title="Character Fields">
-            <div class="card-header">
-              <button class="ghost" @click="onResetCharacter">Reset Character</button>
-            </div>
-
-          <div class="grid-two">
-            <label class="field">
-              <div class="field-head">
-                <span>Name</span>
-                <button class="regen-btn" type="button" @click.stop="onRegenerateField('name')">⟳</button>
-              </div>
-              <input v-model="name" type="text" />
-            </label>
-            <label class="field">
-              <div class="field-head">
-                <span>Tags (comma-separated)</span>
-                <button class="regen-btn" type="button" @click.stop="onRegenerateField('tags')">⟳</button>
-              </div>
-              <input v-model="tagsInput" type="text" placeholder="fantasy, ranger, stoic" />
-            </label>
-          </div>
-
-          <label class="field">
-            <div class="field-head">
-              <span>Description</span>
-              <button class="regen-btn" type="button" @click.stop="onRegenerateField('description')">⟳</button>
-            </div>
-            <textarea v-model="description" rows="4"></textarea>
-          </label>
-
-          <label class="field">
-            <div class="field-head">
-              <span>Personality</span>
-              <button class="regen-btn" type="button" @click.stop="onRegenerateField('personality')">⟳</button>
-            </div>
-            <textarea v-model="personality" rows="4"></textarea>
-          </label>
-
-          <label class="field">
-            <div class="field-head">
-              <span>Scenario</span>
-              <button class="regen-btn" type="button" @click.stop="onRegenerateField('scenario')">⟳</button>
-            </div>
-            <textarea v-model="scenario" rows="4"></textarea>
-          </label>
-
-          <label class="field">
-            <div class="field-head">
-              <span>First message</span>
-              <button class="regen-btn" type="button" @click.stop="onRegenerateField('first_mes')">⟳</button>
-            </div>
-            <textarea v-model="first_mes" rows="4"></textarea>
-          </label>
-
-          <label class="field">
-            <div class="field-head">
-              <span>Example messages</span>
-              <button class="regen-btn" type="button" @click.stop="onRegenerateField('mes_example')">⟳</button>
-            </div>
-            <textarea v-model="mes_example" rows="5"></textarea>
-          </label>
-
-          <label class="field">
-            <div class="field-head">
-              <span>Creator notes</span>
-              <button class="regen-btn" type="button" @click.stop="onRegenerateField('creator_notes')">⟳</button>
-            </div>
-            <textarea v-model="creator_notes" rows="3"></textarea>
-          </label>
-
-          <label class="field">
-            <div class="field-head">
-              <span>Image prompt</span>
-              <button class="regen-btn" type="button" @click.stop="onRegenerateField('image_prompt')">⟳</button>
-            </div>
-            <textarea v-model="image_prompt" rows="3"></textarea>
-          </label>
-
-            <label class="field">
-              <span>Negative prompt</span>
-              <textarea v-model="negative_prompt" rows="3"></textarea>
-            </label>
-          </CollapsiblePanel>
-        </div>
-      </div>
-
-      <aside class="sidebar">
+    <div class="layout grid gap-4 lg:grid-cols-12">
+      <aside class="sidebar col-span-12 lg:col-span-4 lg:order-2">
         <div class="card">
           <h2>Avatar</h2>
           <div class="avatar">
@@ -804,33 +718,49 @@ onUnmounted(() => {
             />
             <div v-else class="placeholder">No image yet</div>
           </div>
-          <p v-if="lastSeed !== null" class="muted">seed: {{ lastSeed }}</p>
+          <p v-if="lastSeed !== null" class="help">seed: {{ lastSeed }}</p>
+          <p v-if="regenerating" class="pill regen-status">
+            <svg class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+              <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            Regenerating…
+          </p>
         </div>
 
         <div class="card actions">
           <h2>Actions</h2>
-          <button class="primary" @click="onGenerate" :disabled="generating">
+          <button class="btn-primary w-full" @click="onGenerate" :disabled="generating">
             {{ generating ? "Generating..." : "Generate" }}
           </button>
 
           <div class="actions-row">
-            <button class="ghost" @click="onFillMissing" :disabled="fillingMissing">
+            <button class="btn-ghost" @click="onFillMissing" :disabled="fillingMissing">
               {{ fillingMissing ? "Filling..." : "Fill missing fields" }}
             </button>
-            <button class="ghost" @click="openRegenModal" :disabled="regenerating">
+            <button class="btn-ghost" @click="openRegenModal" :disabled="regenerating">
+              <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
               {{ regenerating ? "Regenerating..." : "Regenerate..." }}
             </button>
           </div>
+          <p v-if="regenError" class="alert-error regenErrorInline">{{ regenError }}</p>
 
           <div class="actions-group">
             <div class="actions-title">Image</div>
             <div class="actions-row">
-              <button class="ghost" @click="onCreateImagePrompt">Create image prompt</button>
-              <button class="ghost" @click="onGenerateImage" :disabled="generatingImage || missingGoogleKey">
+              <button class="btn-ghost" @click="onCreateImagePrompt">Create image prompt</button>
+              <button class="btn-primary" @click="onGenerateImage" :disabled="generatingImage || missingGoogleKey">
                 {{ generatingImage ? "Generating image..." : "Generate image" }}
               </button>
             </div>
-            <p v-if="missingGoogleKey" class="error">Select a Google API key in Settings to generate images.</p>
+            <p v-if="missingGoogleKey" class="alert-error">Select a Google API key in Settings to generate images.</p>
           </div>
 
           <div class="actions-group">
@@ -838,7 +768,7 @@ onUnmounted(() => {
             <div class="actions-row">
               <button
                 v-if="libraryId"
-                class="ghost"
+                class="btn-primary"
                 @click="onUpdateLibrary"
                 :disabled="savingLibrary"
               >
@@ -846,15 +776,15 @@ onUnmounted(() => {
               </button>
               <button
                 v-else
-                class="ghost"
+                class="btn-primary"
                 @click="onSaveNewToLibrary"
                 :disabled="savingLibrary"
               >
                 {{ savingLibrary ? "Saving..." : "Save to Library" }}
               </button>
               <label class="field inline-field">
-                <span>Library Save Format</span>
-                <select v-model="libraryFormat">
+                <span class="label">Library Save Format</span>
+                <select v-model="libraryFormat" class="select">
                   <option value="png" :disabled="!avatarUrl">PNG Card</option>
                   <option value="json">JSON Only</option>
                 </select>
@@ -862,7 +792,7 @@ onUnmounted(() => {
             </div>
             <div v-if="libraryId" class="actions-row">
               <button
-                class="ghost"
+                class="btn-primary"
                 @click="onSaveNewToLibrary"
                 :disabled="savingLibrary"
               >
@@ -875,7 +805,7 @@ onUnmounted(() => {
             <div class="actions-title">Export / Import</div>
             <div class="actions-row">
               <div class="dropdown">
-                <button class="ghost" type="button" @click.stop="toggleExportMenu">
+                <button class="btn-primary" type="button" @click.stop="toggleExportMenu">
                   Export ▾
                 </button>
                 <div v-if="exportOpen" class="dropdown-menu" @click.stop>
@@ -890,7 +820,7 @@ onUnmounted(() => {
                   </button>
                 </div>
               </div>
-              <button class="ghost" @click="onImportClick" :disabled="importing">
+              <button class="btn-ghost" @click="onImportClick" :disabled="importing">
                 {{ importing ? "Importing..." : "Import" }}
               </button>
             </div>
@@ -903,27 +833,306 @@ onUnmounted(() => {
             />
           </div>
 
-          <p v-if="error" class="error">{{ error }}</p>
-          <p v-if="regenError" class="error">{{ regenError }}</p>
+          <p v-if="error" class="alert-error">{{ error }}</p>
           <p v-if="libraryMessage" class="muted">{{ libraryMessage }}</p>
-          <p v-if="fillError" class="error">{{ fillError }}</p>
-          <p v-if="importError" class="error">{{ importError }}</p>
+          <p v-if="fillError" class="alert-error">{{ fillError }}</p>
+          <p v-if="importError" class="alert-error">{{ importError }}</p>
           <details v-if="errorRaw || issueText" class="details">
             <summary>Details</summary>
             <pre v-if="issueText">{{ issueText }}</pre>
             <pre v-if="errorRaw">{{ errorRaw }}</pre>
           </details>
-          <p v-if="imageError" class="error">{{ imageError }}</p>
+          <p v-if="imageError" class="alert-error">{{ imageError }}</p>
         </div>
       </aside>
+
+      <div class="leftCol col-span-12 lg:col-span-8 lg:order-1">
+        <div class="card">
+          <CollapsiblePanel v-model="panels.inputs" title="Inputs">
+            <label class="field">
+              <span class="label">Character idea</span>
+              <textarea ref="ideaEl" v-model="idea" rows="4" class="textarea" placeholder="Describe the character concept..."></textarea>
+            </label>
+            <p v-if="regenError === 'Character idea is required.'" class="alert-error">
+              Character idea is required to regenerate.
+            </p>
+
+            <div class="grid-two">
+              <label class="field">
+                <span class="label">Name (optional)</span>
+                <input v-model="ideaName" class="input" type="text" placeholder="Name (optional)" />
+              </label>
+
+              <label class="field">
+                <span class="label">POV</span>
+                <select v-model="pov" class="select">
+                  <option value="first">First person</option>
+                  <option value="second">Second person</option>
+                  <option value="third">Third person</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="field">
+              <span class="label">Max tokens (regen only)</span>
+              <div class="flex flex-wrap items-center gap-3">
+                <label class="inline-flex items-center gap-2 text-sm">
+                  <input type="checkbox" v-model="regenMaxTokensEnabled" />
+                  <span class="help">Enable</span>
+                </label>
+                <input
+                  v-model.number="regenMaxTokens"
+                  type="number"
+                  min="32"
+                  max="4096"
+                  step="1"
+                  class="input w-28"
+                  :disabled="!regenMaxTokensEnabled"
+                  @input="validateRegenMaxTokens(regenMaxTokens)"
+                  @blur="regenMaxTokens = clampRegenMaxTokens(regenMaxTokens)"
+                />
+                <span
+                  class="help"
+                  title="Applies only to regenerating selected fields. Full character generation ignores this setting."
+                >ⓘ</span>
+              </div>
+              <p v-if="regenMaxTokensEnabled && regenMaxTokensError" class="alert-error">
+                {{ regenMaxTokensError }}
+              </p>
+            </div>
+
+            <details class="details">
+              <summary>Lorebook (optional)</summary>
+              <label class="field">
+                <span class="label">Extra lore, world info, or constraints</span>
+                <textarea v-model="lorebook" rows="4" class="textarea" placeholder="Lorebook snippets..."></textarea>
+              </label>
+            </details>
+          </CollapsiblePanel>
+        </div>
+
+        <div :class="['fieldsPanelWrap', { grow: panels.fields }]">
+          <div class="card">
+            <CollapsiblePanel v-model="panels.fields" title="Character Fields">
+              <div class="card-header">
+                <button class="btn-ghost" @click="onResetCharacter">Reset Character</button>
+              </div>
+
+          <div class="grid-two">
+            <label class="field">
+              <div class="field-head">
+                <span class="label">Name</span>
+                <button
+                  class="regen-btn h-8 w-8 inline-flex items-center justify-center"
+                  type="button"
+                  @click.stop="onRegenerateField('name')"
+                  :disabled="regenerating"
+                >
+                  <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </div>
+              <input v-model="name" class="input" type="text" />
+            </label>
+            <label class="field">
+              <div class="field-head">
+                <span class="label">Tags (comma-separated)</span>
+                <button
+                  class="regen-btn h-8 w-8 inline-flex items-center justify-center"
+                  type="button"
+                  @click.stop="onRegenerateField('tags')"
+                  :disabled="regenerating"
+                >
+                  <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </div>
+              <input v-model="tagsInput" class="input" type="text" placeholder="fantasy, ranger, stoic" />
+            </label>
+          </div>
+
+          <label class="field">
+            <div class="field-head">
+              <span class="label">Description</span>
+              <button
+                class="regen-btn h-8 w-8 inline-flex items-center justify-center"
+                type="button"
+                @click.stop="onRegenerateField('description')"
+                :disabled="regenerating"
+              >
+                <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+              </button>
+            </div>
+            <textarea v-model="description" rows="4" class="textarea"></textarea>
+          </label>
+
+          <label class="field">
+            <div class="field-head">
+              <span class="label">Personality</span>
+              <button
+                class="regen-btn h-8 w-8 inline-flex items-center justify-center"
+                type="button"
+                @click.stop="onRegenerateField('personality')"
+                :disabled="regenerating"
+              >
+                <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+              </button>
+            </div>
+            <textarea v-model="personality" rows="4" class="textarea"></textarea>
+          </label>
+
+          <label class="field">
+            <div class="field-head">
+              <span class="label">Scenario</span>
+              <button
+                class="regen-btn h-8 w-8 inline-flex items-center justify-center"
+                type="button"
+                @click.stop="onRegenerateField('scenario')"
+                :disabled="regenerating"
+              >
+                <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+              </button>
+            </div>
+            <textarea v-model="scenario" rows="4" class="textarea"></textarea>
+          </label>
+
+          <label class="field">
+            <div class="field-head">
+              <span class="label">First message</span>
+              <button
+                class="regen-btn h-8 w-8 inline-flex items-center justify-center"
+                type="button"
+                @click.stop="onRegenerateField('first_mes')"
+                :disabled="regenerating"
+              >
+                <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+              </button>
+            </div>
+            <textarea v-model="first_mes" rows="4" class="textarea"></textarea>
+          </label>
+
+          <label class="field">
+            <div class="field-head">
+              <span class="label">Example messages</span>
+              <button
+                class="regen-btn h-8 w-8 inline-flex items-center justify-center"
+                type="button"
+                @click.stop="onRegenerateField('mes_example')"
+                :disabled="regenerating"
+              >
+                <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+              </button>
+            </div>
+            <textarea v-model="mes_example" rows="5" class="textarea"></textarea>
+          </label>
+
+          <label class="field">
+            <div class="field-head">
+              <span class="label">Creator notes</span>
+              <button
+                class="regen-btn h-8 w-8 inline-flex items-center justify-center"
+                type="button"
+                @click.stop="onRegenerateField('creator_notes')"
+                :disabled="regenerating"
+              >
+                <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+              </button>
+            </div>
+            <textarea v-model="creator_notes" rows="3" class="textarea"></textarea>
+          </label>
+
+          <label class="field">
+            <div class="field-head">
+              <span class="label">Image prompt</span>
+              <button
+                class="regen-btn h-8 w-8 inline-flex items-center justify-center"
+                type="button"
+                @click.stop="onRegenerateField('image_prompt')"
+                :disabled="regenerating"
+              >
+                <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+              </button>
+            </div>
+            <textarea v-model="image_prompt" rows="3" class="textarea"></textarea>
+          </label>
+
+            <label class="field">
+              <span class="label">Negative prompt</span>
+              <textarea v-model="negative_prompt" rows="3" class="textarea"></textarea>
+            </label>
+            </CollapsiblePanel>
+          </div>
+        </div>
+      </div>
     </div>
     <div v-if="showRegenModal" class="modalOverlay" @click.self="showRegenModal = false">
       <div class="modal">
         <div class="modalHeader">
           <h3>Regenerate Fields</h3>
-          <button class="ghost" @click="showRegenModal = false" aria-label="Close">X</button>
+          <button class="btn-ghost" @click="showRegenModal = false" aria-label="Close">X</button>
         </div>
-        <p class="muted">{{ regenSummary }}</p>
+        <p class="help">{{ regenSummary }}</p>
         <div class="check-grid modal-grid">
           <label class="check"><input type="checkbox" v-model="regenSelect.name" />Name</label>
           <label class="check"><input type="checkbox" v-model="regenSelect.description" />Description</label>
@@ -940,8 +1149,16 @@ onUnmounted(() => {
           <input type="checkbox" v-model="regen.keepAvatar" />Keep avatar
         </label>
         <div class="modalActions">
-          <button class="ghost" @click="showRegenModal = false">Cancel</button>
-          <button @click="confirmRegenerate" :disabled="regenerating">
+          <button class="btn-ghost" @click="showRegenModal = false">Cancel</button>
+          <button class="btn-primary" @click="confirmRegenerate" :disabled="regenerating">
+            <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+              <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
             {{ regenerating ? "Regenerating..." : "Regenerate selected" }}
           </button>
         </div>
@@ -982,9 +1199,7 @@ onUnmounted(() => {
   font-size: 14px;
 }
 .layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 20px;
+  min-height: 0;
 }
 .leftCol {
   display: flex;
@@ -1013,12 +1228,6 @@ onUnmounted(() => {
   top: 16px;
   align-self: start;
 }
-.card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-  background: var(--panel);
-}
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -1045,21 +1254,14 @@ onUnmounted(() => {
   border-radius: 999px;
   opacity: 0;
 }
+.regenErrorInline {
+  margin-top: 8px;
+}
 .field:hover .regen-btn,
 .regen-btn:focus-visible {
   opacity: 1;
   color: var(--text);
   border-color: var(--border-2);
-}
-.field input,
-.field select,
-.field textarea {
-  padding: 10px;
-  border-radius: 10px;
-  border: 1px solid var(--border-2);
-  background: var(--panel-3);
-  color: var(--text);
-  resize: vertical;
 }
 .grid-two {
   display: grid;
@@ -1092,11 +1294,6 @@ onUnmounted(() => {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-.primary {
-  width: 100%;
-  padding: 12px;
-  font-weight: 600;
-}
 .dropdown {
   position: relative;
 }
@@ -1128,25 +1325,6 @@ onUnmounted(() => {
   margin: 0;
   min-width: 180px;
 }
-.inline-field span {
-  font-size: 12px;
-  color: var(--muted);
-}
-button {
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border-2);
-  background: var(--accent);
-  color: var(--text);
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.ghost {
-  background: transparent;
-}
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -1157,11 +1335,6 @@ button:disabled {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-.error {
-  color: #c94a4a;
-  font-weight: 600;
-  margin-top: 10px;
 }
 .details {
   margin-top: 10px;

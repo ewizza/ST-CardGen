@@ -24,7 +24,9 @@ onMounted(() => {
 
 watchEffect(() => {
   document.documentElement.dataset.theme = theme.value;
+  document.documentElement.classList.toggle("dark", theme.value === "dark");
 });
+
 
 watch(
   () => route.fullPath,
