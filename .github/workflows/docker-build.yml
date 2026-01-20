@@ -7,9 +7,6 @@ on:
   release:
     types: [published]
 
-env:
-  IMAGE_NAME: ghcr.io/${{ toLower(github.repository) }}
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,17 +28,19 @@ jobs:
 
       - id: compute-tags
         run: |
-          tags="${IMAGE_NAME}:${GITHUB_SHA}"
+          repo_lower=$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          image_name="ghcr.io/${repo_lower}"
+          tags="${image_name}:${GITHUB_SHA}"
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            tags+=",${IMAGE_NAME}:latest"
+            tags+=",${image_name}:latest"
           fi
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF#refs/tags/}"
-            tags+=",${IMAGE_NAME}:${version}"
+            tags+=",${image_name}:${version}"
           fi
           if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
             release_tag="${GITHUB_EVENT_RELEASE_TAG_NAME:-${GITHUB_REF#refs/tags/}}"
-            tags+=",${IMAGE_NAME}:${release_tag}"
+            tags+=",${image_name}:${release_tag}"
           fi
           echo "tags=$tags" >> $GITHUB_OUTPUT
 
