@@ -1,4 +1,5 @@
 import { loadConfig } from "../../config/store.js";
+import { httpGetJson } from "../../utils/http.js";
 
 function normalizeBaseUrl(url: string) {
   return url.replace(/\/+$/, "");
@@ -9,16 +10,10 @@ export function getComfyBaseUrl() {
   return normalizeBaseUrl(cfg.image.baseUrls?.comfyui || "http://127.0.0.1:8188");
 }
 
-async function fetchJson(url: string) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return res.json();
-}
-
 export async function getSystemStats(baseUrl: string) {
-  return fetchJson(`${baseUrl}/system_stats`);
+  return httpGetJson(`${baseUrl}/system_stats`, { timeoutMs: 8000 });
 }
 
 export async function getObjectInfo(baseUrl: string) {
-  return fetchJson(`${baseUrl}/object_info`);
+  return httpGetJson(`${baseUrl}/object_info`, { timeoutMs: 8000 });
 }

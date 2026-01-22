@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getComfyBaseUrl, getSystemStats, getObjectInfo } from "../adapters/comfyui/client.js";
 import { extractCheckpointModels, extractLoras } from "../adapters/comfyui/parse.js";
+import { httpGetBuffer, isHttpRequestError } from "../utils/http.js";
 
 
 export const comfyuiRouter = Router();
@@ -75,17 +76,14 @@ comfyuiRouter.get("/view", async (req, res) => {
 
     const query = params.toString();
     const url = query ? `${baseUrl}/view?${query}` : `${baseUrl}/view`;
-    const r = await fetch(url);
-    if (!r.ok) {
-      return res.status(200).json({ ok: false, baseUrl, error: `ComfyUI /view failed: HTTP ${r.status} ${r.statusText}` });
-    }
-
-    const contentType = r.headers.get("content-type") || "application/octet-stream";
-    const buffer = Buffer.from(await r.arrayBuffer());
+    const { buffer, contentType } = await httpGetBuffer(url, { timeoutMs: 15000 });
     res.setHeader("Content-Type", contentType);
     res.setHeader("Content-Length", String(buffer.length));
     return res.send(buffer);
   } catch (e: any) {
+    if (isHttpRequestError(e)) {
+      return res.status(200).json({ ok: false, baseUrl, error: e.message, details: e.details });
+    }
     return res.status(200).json({ ok: false, baseUrl, error: String(e?.message ?? e) });
   }
 });

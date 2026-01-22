@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import sanitizeFilename from "sanitize-filename";
 
-import { loadConfig } from "../../config/store.js";
 import { buildV2CardFromStorePayload, normalizeImportedCard } from "../cards/v2.js";
 import { embedCardIntoPng, extractCardFromPng } from "../cards/png.js";
+import { assertRepoWritable, ensureRepoDir, resolveRepo, type LibraryRepo } from "./repos.js";
 
 export type LibraryItem = {
   id: string;
@@ -19,6 +19,10 @@ export type LibraryItem = {
 
 export type LibrarySaveFormat = "json" | "png";
 
+export type LibraryTransferMode = "copy" | "move";
+
+export type LibraryTransferFormat = "auto" | LibrarySaveFormat;
+
 type LibraryIndexItem = {
   id: string;
   name: string;
@@ -32,6 +36,7 @@ type LibraryIndex = {
 
 type LibraryList = {
   dir: string;
+  repo: LibraryRepo;
   items: LibraryItem[];
 };
 
@@ -41,15 +46,12 @@ type CachedScan = {
   items: LibraryItem[];
 };
 
-let cache: CachedScan | null = null;
+const cacheByDir = new Map<string, CachedScan>();
 
-function getLibraryDir() {
-  const cfg = loadConfig();
-  return cfg.library.dir;
-}
-
-function ensureDir(dir: string) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+function getRepo(repoId?: string) {
+  const repo = resolveRepo(repoId);
+  ensureRepoDir(repo);
+  return repo;
 }
 
 function indexPath(dir: string) {
@@ -152,7 +154,8 @@ function buildFilesystemItem(dir: string, fileBase: string, pngFile?: string, js
 
 function scanLibraryDir(dir: string): LibraryItem[] {
   const now = Date.now();
-  if (cache && cache.dir === dir && now - cache.at < 5000) return cache.items;
+  const cached = cacheByDir.get(dir);
+  if (cached && now - cached.at < 5000) return cached.items;
 
   const items: LibraryItem[] = [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -175,14 +178,16 @@ function scanLibraryDir(dir: string): LibraryItem[] {
     items.push(buildFilesystemItem(dir, base, record.png, record.json));
   }
 
-  cache = { dir, at: now, items };
+  cacheByDir.set(dir, { dir, at: now, items });
   return items;
 }
 
-function resolveFileBaseCandidates(dir: string, id: string) {
-  const index = readIndex(dir);
-  if (index.items.find((item) => item.id === id)) {
-    return [id];
+function resolveFileBaseCandidates(dir: string, id: string, useIndex: boolean) {
+  if (useIndex) {
+    const index = readIndex(dir);
+    if (index.items.find((item) => item.id === id)) {
+      return [id];
+    }
   }
 
   const decoded = decodeId(id);
@@ -194,8 +199,8 @@ function resolveFileBaseCandidates(dir: string, id: string) {
   return [safeBaseName(id)];
 }
 
-function resolvePaths(dir: string, id: string) {
-  const candidates = resolveFileBaseCandidates(dir, id);
+function resolvePaths(dir: string, id: string, useIndex: boolean) {
+  const candidates = resolveFileBaseCandidates(dir, id, useIndex);
   for (const base of candidates) {
     const jp = jsonPath(dir, base);
     const pp = pngPath(dir, base);
@@ -227,11 +232,20 @@ function writeCardFiles(
   if (fs.existsSync(jp)) fs.unlinkSync(jp);
 }
 
-export function listLibraryItems(): LibraryList {
-  const dir = getLibraryDir();
-  ensureDir(dir);
-  const index = readIndex(dir);
+function outputIdForRepo(repo: LibraryRepo, fileBase: string) {
+  return repo.kind === "folder" ? encodeId(fileBase) : fileBase;
+}
+
+export function listLibraryItems(repoId?: string): LibraryList {
+  const repo = getRepo(repoId);
+  const dir = repo.dir;
   const scanned = scanLibraryDir(dir);
+
+  if (repo.kind !== "managed") {
+    return { dir, repo, items: scanned };
+  }
+
+  const index = readIndex(dir);
   const scannedByBase = new Map(scanned.map((item) => [item.fileBase, item]));
 
   const items: LibraryItem[] = [];
@@ -254,13 +268,13 @@ export function listLibraryItems(): LibraryList {
   items.push(...scannedByBase.values());
   items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-  return { dir, items };
+  return { dir, repo, items };
 }
 
-export function loadLibraryCard(id: string) {
-  const dir = getLibraryDir();
-  ensureDir(dir);
-  const resolved = resolvePaths(dir, id);
+export function loadLibraryCard(repoId: string | undefined, id: string) {
+  const repo = getRepo(repoId);
+  const dir = repo.dir;
+  const resolved = resolvePaths(dir, id, repo.kind === "managed");
 
   let cardJson: string | null = null;
   if (resolved.jsonPath) {
@@ -273,138 +287,147 @@ export function loadLibraryCard(id: string) {
   const parsed = JSON.parse(cardJson);
   const cardV2 = normalizeImportedCard(parsed);
   const hasPng = Boolean(resolved.pngPath);
-  return { dir, cardV2, hasPng };
+  return { dir, repo, cardV2, hasPng };
 }
 
-export function loadLibraryPng(id: string) {
-  const dir = getLibraryDir();
-  ensureDir(dir);
-  const resolved = resolvePaths(dir, id);
+export function loadLibraryPng(repoId: string | undefined, id: string) {
+  const repo = getRepo(repoId);
+  const dir = repo.dir;
+  const resolved = resolvePaths(dir, id, repo.kind === "managed");
   if (!resolved.pngPath) throw new Error("Image not found");
   return fs.readFileSync(resolved.pngPath);
 }
 
 export function saveLibraryCard(
+  repoId: string | undefined,
   payload: Record<string, any>,
   format: LibrarySaveFormat,
   avatarPng?: Buffer | null,
 ) {
-  const dir = getLibraryDir();
-  ensureDir(dir);
+  const repo = getRepo(repoId);
+  assertRepoWritable(repo);
 
   const card = buildV2CardFromStorePayload(payload);
   const id = makeId(String(payload?.name ?? ""));
   const now = new Date().toISOString();
 
-  writeCardFiles(dir, id, card, format, avatarPng);
+  writeCardFiles(repo.dir, id, card, format, avatarPng);
 
-  const index = readIndex(dir);
-  index.items.unshift({
-    id,
-    name: String(payload?.name ?? "Untitled"),
-    createdAt: now,
-    updatedAt: now,
-  });
-  writeIndex(dir, index);
+  if (repo.kind === "managed") {
+    const index = readIndex(repo.dir);
+    index.items.unshift({
+      id,
+      name: String(payload?.name ?? "Untitled"),
+      createdAt: now,
+      updatedAt: now,
+    });
+    writeIndex(repo.dir, index);
+  }
 
-  cache = null;
-  return { dir, id };
+  cacheByDir.delete(repo.dir);
+  return { dir: repo.dir, id: outputIdForRepo(repo, id), repo };
 }
 
 export function updateLibraryCard(
+  repoId: string | undefined,
   idOrEncoded: string,
   payload: Record<string, any>,
   format: LibrarySaveFormat,
   avatarPng?: Buffer | null,
 ) {
-  const dir = getLibraryDir();
-  ensureDir(dir);
+  const repo = getRepo(repoId);
+  assertRepoWritable(repo);
 
-  const resolved = resolvePaths(dir, idOrEncoded);
+  const resolved = resolvePaths(repo.dir, idOrEncoded, repo.kind === "managed");
   if (!resolved.jsonPath && !resolved.pngPath) throw new Error("Card not found");
 
   const card = buildV2CardFromStorePayload(payload);
   const fileBase = resolved.fileBase;
   const now = new Date().toISOString();
 
-  writeCardFiles(dir, fileBase, card, format, avatarPng);
+  writeCardFiles(repo.dir, fileBase, card, format, avatarPng);
 
-  const index = readIndex(dir);
-  const existing = index.items.find((item) => item.id === fileBase);
-  if (existing) {
-    existing.name = String(payload?.name ?? "Untitled");
-    existing.updatedAt = now;
-  } else {
-    index.items.unshift({
-      id: fileBase,
-      name: String(payload?.name ?? "Untitled"),
-      createdAt: now,
-      updatedAt: now,
-    });
+  if (repo.kind === "managed") {
+    const index = readIndex(repo.dir);
+    const existing = index.items.find((item) => item.id === fileBase);
+    if (existing) {
+      existing.name = String(payload?.name ?? "Untitled");
+      existing.updatedAt = now;
+    } else {
+      index.items.unshift({
+        id: fileBase,
+        name: String(payload?.name ?? "Untitled"),
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    writeIndex(repo.dir, index);
   }
-  writeIndex(dir, index);
 
-  cache = null;
-  return { dir, id: fileBase };
+  cacheByDir.delete(repo.dir);
+  return { dir: repo.dir, id: outputIdForRepo(repo, fileBase), repo };
 }
 
-export function deleteLibraryItem(idOrEncoded: string) {
-  const dir = getLibraryDir();
-  ensureDir(dir);
-  const resolvedDir = path.resolve(dir);
+export function deleteLibraryItem(repoId: string | undefined, idOrEncoded: string) {
+  const repo = getRepo(repoId);
+  assertRepoWritable(repo);
+  const resolvedDir = path.resolve(repo.dir);
 
-  const index = readIndex(dir);
-  const decoded = decodeId(idOrEncoded);
-  const candidates = Array.from(new Set([
-    ...index.items.filter((item) => item.id === idOrEncoded).map((item) => item.id),
-    idOrEncoded,
-    decoded ?? "",
-  ])).filter(Boolean);
-
-  let fileBase: string | null = null;
-  let foundJson: string | undefined;
-  let foundPng: string | undefined;
-
-  for (const candidate of candidates) {
-    let safeCandidate: string;
-    try {
-      safeCandidate = safeBaseName(candidate);
-    } catch {
-      continue;
-    }
-    const jp = jsonPath(dir, safeCandidate);
-    const pp = pngPath(dir, safeCandidate);
-    const hasJson = fs.existsSync(jp);
-    const hasPng = fs.existsSync(pp);
-    if (hasJson || hasPng) {
-      fileBase = safeCandidate;
-      foundJson = hasJson ? jp : undefined;
-      foundPng = hasPng ? pp : undefined;
-      break;
-    }
-  }
-
-  if (!fileBase) throw new Error("Card not found");
+  const resolved = resolvePaths(repo.dir, idOrEncoded, repo.kind === "managed");
+  if (!resolved.jsonPath && !resolved.pngPath) throw new Error("Card not found");
 
   const validatePath = (filePath?: string) => {
     if (!filePath) return;
-    const resolved = path.resolve(filePath);
-    if (!resolved.startsWith(resolvedDir + path.sep) && resolved !== resolvedDir) {
+    const resolvedPath = path.resolve(filePath);
+    if (!resolvedPath.startsWith(resolvedDir + path.sep) && resolvedPath !== resolvedDir) {
       throw new Error("Invalid file path");
     }
   };
 
-  validatePath(foundPng);
-  validatePath(foundJson);
+  validatePath(resolved.pngPath);
+  validatePath(resolved.jsonPath);
 
-  if (foundPng && fs.existsSync(foundPng)) fs.unlinkSync(foundPng);
-  if (foundJson && fs.existsSync(foundJson)) fs.unlinkSync(foundJson);
+  if (resolved.pngPath && fs.existsSync(resolved.pngPath)) fs.unlinkSync(resolved.pngPath);
+  if (resolved.jsonPath && fs.existsSync(resolved.jsonPath)) fs.unlinkSync(resolved.jsonPath);
 
-  const nextIndex = readIndex(dir);
-  const nextItems = nextIndex.items.filter((item) => item.id !== fileBase);
-  if (nextItems.length !== nextIndex.items.length) {
-    writeIndex(dir, { items: nextItems });
+  if (repo.kind === "managed") {
+    const nextIndex = readIndex(repo.dir);
+    const nextItems = nextIndex.items.filter((item) => item.id !== resolved.fileBase);
+    if (nextItems.length !== nextIndex.items.length) {
+      writeIndex(repo.dir, { items: nextItems });
+    }
   }
 
-  cache = null;
+  cacheByDir.delete(repo.dir);
+}
+
+export function transferLibraryItem(args: {
+  fromRepoId?: string;
+  toRepoId?: string;
+  id: string;
+  mode: LibraryTransferMode;
+  destFormat?: LibraryTransferFormat;
+}) {
+  const fromRepo = getRepo(args.fromRepoId);
+  const toRepo = getRepo(args.toRepoId);
+  assertRepoWritable(toRepo);
+  if (args.mode === "move") assertRepoWritable(fromRepo);
+
+  const { cardV2, hasPng } = loadLibraryCard(fromRepo.id, args.id);
+  const payload = cardV2.data ?? {};
+  const requestedFormat = args.destFormat ?? "auto";
+  const format: LibrarySaveFormat = requestedFormat === "auto" ? (hasPng ? "png" : "json") : requestedFormat;
+  let avatarPng: Buffer | null = null;
+  if (format === "png") {
+    if (!hasPng) throw new Error("Source item has no PNG to copy");
+    avatarPng = loadLibraryPng(fromRepo.id, args.id);
+  }
+
+  const saved = saveLibraryCard(toRepo.id, payload, format, avatarPng);
+
+  if (args.mode === "move") {
+    deleteLibraryItem(fromRepo.id, args.id);
+  }
+
+  return { ok: true, to: { repoId: saved.repo.id, id: saved.id, dir: saved.dir } };
 }

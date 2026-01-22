@@ -18,12 +18,27 @@ async function postJson(url: string, body: any, timeoutMs: number): Promise<Post
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === "AbortError") {
+        return {
+          ok: false,
+          status: 0,
+          statusText: "TIMEOUT",
+          text: `Request timed out after ${timeoutMs}ms`,
+        };
+      }
+      const msg = String(e?.message ?? e);
+      return { ok: false, status: 0, statusText: "NETWORK", text: msg };
+    }
+
     const text = await res.text().catch(() => "");
     if (!res.ok) return { ok: false, status: res.status, statusText: res.statusText, text };
     try {
@@ -62,7 +77,7 @@ export async function koboldGenerateText(
   const baseUrl = normalizeBaseUrl(cfg.text.koboldcpp?.baseUrl || "http://127.0.0.1:5001");
   const model = cfg.text.koboldcpp?.model;
   const defaults = cfg.text.koboldcpp?.defaultParams ?? {};
-  const timeoutMs = 60_000;
+  const timeoutMs = cfg.text.koboldcpp?.requestTimeoutMs ?? 10 * 60_000;
 
   const temperature = params?.temperature ?? defaults.temperature;
   const top_p = params?.top_p ?? defaults.top_p;
@@ -86,6 +101,15 @@ export async function koboldGenerateText(
     const completion = await postJson(`${baseUrl}/v1/completions`, completionBody, timeoutMs);
     if (!completion.ok) {
       const snippet = completion.text.slice(0, 500);
+      if (completion.status === 0 && completion.statusText === "TIMEOUT") {
+        throw new Error(
+          `KoboldCPP request timed out after ${Math.round(timeoutMs / 1000)}s. ` +
+          "Increase \"Text Completion -> Request timeout\" in Settings, or reduce Max Tokens / use a shorter field preset."
+        );
+      }
+      if (completion.status === 0 && completion.statusText === "NETWORK") {
+        throw new Error(`KoboldCPP network error: ${snippet}`.trim());
+      }
       throw new Error(`KoboldCPP error: HTTP ${completion.status} ${completion.statusText} ${snippet}`.trim());
     }
     const text = extractCompletionText(completion.json);
@@ -95,6 +119,15 @@ export async function koboldGenerateText(
 
   if (!chat.ok) {
     const snippet = chat.text.slice(0, 500);
+    if (chat.status === 0 && chat.statusText === "TIMEOUT") {
+      throw new Error(
+        `KoboldCPP request timed out after ${Math.round(timeoutMs / 1000)}s. ` +
+        "Increase \"Text Completion -> Request timeout\" in Settings, or reduce Max Tokens / use a shorter field preset."
+      );
+    }
+    if (chat.status === 0 && chat.statusText === "NETWORK") {
+      throw new Error(`KoboldCPP network error: ${snippet}`.trim());
+    }
     throw new Error(`KoboldCPP error: HTTP ${chat.status} ${chat.statusText} ${snippet}`.trim());
   }
 

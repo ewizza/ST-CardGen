@@ -204,13 +204,16 @@ characterRouter.post("/generate", async (req, res) => {
     const body = GenerateSchema.parse(req.body);
     const cfg = loadConfig();
     const contentRating = cfg.generation?.contentRating ?? "nsfw_allowed";
-    const prompt = buildCharacterGenPrompt({
-      idea: body.idea,
-      name: body.name,
-      pov: body.pov,
-      lorebook: body.lorebook,
-      contentRating,
-    });
+    const fieldDetail = cfg.generation?.fieldDetail;
+    const prompt = buildCharacterGenPrompt(
+      {
+        idea: body.idea,
+        name: body.name,
+        pov: body.pov,
+        lorebook: body.lorebook,
+      },
+      { contentRating, fieldDetail }
+    );
 
     raw = await generateText("", prompt);
     const character = parseCharacterResponse(raw);
@@ -236,13 +239,18 @@ characterRouter.post("/fill-missing", async (req, res) => {
       return res.json({ ok: true, patch: {} });
     }
 
-    const prompt = buildFillMissingPrompt({
-      card: body.card,
-      missingKeys,
-      pov: body.pov,
-      idea: body.idea,
-      lorebook: body.lorebook,
-    });
+    const cfg = loadConfig();
+    const fieldDetail = cfg.generation?.fieldDetail;
+    const prompt = buildFillMissingPrompt(
+      {
+        card: body.card,
+        missingKeys,
+        pov: body.pov,
+        idea: body.idea,
+        lorebook: body.lorebook,
+      },
+      { fieldDetail }
+    );
 
     const raw = await generateText("", prompt);
     const parsed = tryParseJson(raw);
@@ -339,16 +347,21 @@ characterRouter.post("/regenerate", async (req, res) => {
     let lastFiltered: Record<string, any> = {};
     const maxTokens = body.maxTokens;
     const regenParams = maxTokens ? { max_tokens: maxTokens } : undefined;
+    const cfg = loadConfig();
+    const fieldDetail = cfg.generation?.fieldDetail;
     for (let attempt = 0; attempt < 3; attempt++) {
-      const prompt = buildRegeneratePrompt({
-        idea: body.idea,
-        requestedName: body.requestedName,
-        pov: body.pov,
-        lorebook: body.lorebook,
-        card: body.card,
-        targets,
-        regenNonce: makeNonce(),
-      });
+      const prompt = buildRegeneratePrompt(
+        {
+          idea: body.idea,
+          requestedName: body.requestedName,
+          pov: body.pov,
+          lorebook: body.lorebook,
+          card: body.card,
+          targets,
+          regenNonce: makeNonce(),
+        },
+        { fieldDetail }
+      );
 
       const raw = await generateText("", prompt, regenParams);
       const parsed = tryParseJson(raw);

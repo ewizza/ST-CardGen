@@ -6,7 +6,7 @@ import { useLocalStorage } from "@vueuse/core";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useCharacterStore } from "@/stores/characterStore";
 import { fillMissing, generateCharacter, generateImagePrompt, regenerateCharacter } from "@/services/character";
-import { generateImage } from "@/services/image";
+import { cancelImageJob, generateImage, waitForImageJob, type ImageJob } from "@/services/image";
 import { saveToLibrary, updateLibraryItem } from "@/services/library";
 import { resolveImageSrc, withCacheBust } from "@/lib/imageUrl";
 import { useRegenerateStore } from "@/stores/regenerateStore";
@@ -37,6 +37,7 @@ const {
   avatarUrl,
   lastSeed,
   libraryId,
+  libraryRepoId,
 } = storeToRefs(characterStore);
 
 const tagsInput = computed({
@@ -48,6 +49,7 @@ const tagsInput = computed({
 
 const autoImage = useLocalStorage("ccg_auto_image", true);
 const libraryFormat = useLocalStorage<"png" | "json">("ccg_library_format", "png");
+const libraryTargetRepoId = useLocalStorage("ccg_library_target_repo_v1", "");
 const panels = useLocalStorage("ccg_character_panels_v1", {
   inputs: true,
   fields: true,
@@ -63,12 +65,15 @@ const regenerating = ref(false);
 const error = ref<string | null>(null);
 const fillError = ref<string | null>(null);
 const regenError = ref<string | null>(null);
+const errorScope = ref<"inputs" | "sidebar" | null>(null);
 const regenMaxTokensEnabled = ref(false);
 const regenMaxTokens = ref(512);
 const regenMaxTokensError = ref<string | null>(null);
 const errorRaw = ref<string | null>(null);
 const errorIssues = ref<any>(null);
 const imageError = ref<string | null>(null);
+const imageJob = ref<ImageJob | null>(null);
+const imageJobAbort = ref<AbortController | null>(null);
 const libraryMessage = ref<string | null>(null);
 const showImageOverlay = ref(false);
 const showRegenModal = ref(false);
@@ -83,13 +88,26 @@ const missingGoogleKey = computed(
   () => cfg.config?.image.provider === "google" && !cfg.config.image.google?.apiKeyRef
 );
 
+const libraryRepos = computed(() => cfg.config?.library?.repositories ?? []);
+const activeLibraryRepoId = computed(() => cfg.config?.library?.activeRepoId || "cardgen");
+const targetLibraryRepoId = computed({
+  get: () => libraryTargetRepoId.value || activeLibraryRepoId.value,
+  set: (value: string) => { libraryTargetRepoId.value = value; },
+});
+
+function repoLabel(id: string) {
+  return libraryRepos.value.find((repo) => repo.id === id)?.name || id;
+}
+
 async function onGenerate() {
   error.value = null;
   errorRaw.value = null;
   errorIssues.value = null;
+  errorScope.value = null;
 
   if (!idea.value.trim()) {
     error.value = "Character idea is required.";
+    errorScope.value = "inputs";
     return;
   }
 
@@ -104,6 +122,7 @@ async function onGenerate() {
 
     if (!res.ok) {
       error.value = res.error ?? "Character generation failed.";
+      errorScope.value = "inputs";
       errorRaw.value = res.raw ?? null;
       errorIssues.value = res.issues ?? null;
       return;
@@ -111,10 +130,11 @@ async function onGenerate() {
 
     if (!res.character) {
       error.value = "No character payload returned.";
+      errorScope.value = "inputs";
       return;
     }
 
-    characterStore.setLibraryId(null);
+    characterStore.setLibraryContext(null, null);
     characterStore.applyGenerated(res.character);
 
     if (autoImage.value && image_prompt.value.trim()) {
@@ -122,6 +142,7 @@ async function onGenerate() {
     }
   } catch (e: any) {
     error.value = String(e?.message ?? e);
+    errorScope.value = "inputs";
   } finally {
     generating.value = false;
   }
@@ -279,6 +300,9 @@ function onRegenerateField(field: RegenField) {
 
 async function onGenerateImage() {
   imageError.value = null;
+  imageJob.value = null;
+  imageJobAbort.value?.abort();
+  imageJobAbort.value = null;
   if (!image_prompt.value.trim()) {
     const ok = await onCreateImagePrompt();
     if (!ok) return;
@@ -308,6 +332,22 @@ async function onGenerateImage() {
       return;
     }
 
+    if (res.jobId) {
+      imageJobAbort.value = new AbortController();
+      imageJob.value = { id: res.jobId, state: "queued", progress: 0, message: "Queued" };
+
+      const finalJob = await waitForImageJob(res.jobId, {
+        signal: imageJobAbort.value.signal,
+        onUpdate: (j) => (imageJob.value = j),
+      });
+
+      const src = resolveImageSrc(finalJob.result?.imageUrl, undefined);
+      avatarUrl.value = src ? withCacheBust(src) : null;
+
+      if (!avatarUrl.value) imageError.value = "Job completed but no imageUrl was returned.";
+      return;
+    }
+
     const src = resolveImageSrc(res.imageUrl, res.imageBase64);
     avatarUrl.value = src ? withCacheBust(src) : null;
     lastSeed.value = res.seed ?? null;
@@ -316,6 +356,14 @@ async function onGenerateImage() {
   } finally {
     generatingImage.value = false;
   }
+}
+
+async function onCancelImageJob() {
+  const id = imageJob.value?.id;
+  if (id) {
+    await cancelImageJob(id).catch(() => {});
+  }
+  imageJobAbort.value?.abort();
 }
 
 function isEmptyValue(value: any) {
@@ -463,16 +511,19 @@ async function downloadFromEndpoint(url: string, body: any, fallbackName: string
 
 async function onExportJson() {
   error.value = null;
+  errorScope.value = null;
   try {
     const payload = buildCardPayload();
     await downloadFromEndpoint("/api/cards/export/json", { card: payload }, "character.json");
   } catch (e: any) {
     error.value = String(e?.message ?? e);
+    errorScope.value = "sidebar";
   }
 }
 
 async function onExportPng() {
   error.value = null;
+  errorScope.value = null;
   try {
     if (!avatarUrl.value) throw new Error("No avatar image to export.");
     const payload = buildCardPayload();
@@ -482,11 +533,13 @@ async function onExportPng() {
     }, "character.png");
   } catch (e: any) {
     error.value = String(e?.message ?? e);
+    errorScope.value = "sidebar";
   }
 }
 
 async function onExportAvatar() {
   error.value = null;
+  errorScope.value = null;
   try {
     if (!avatarUrl.value) throw new Error("No avatar image to export.");
     await downloadFromEndpoint("/api/cards/export/avatar", {
@@ -494,28 +547,34 @@ async function onExportAvatar() {
     }, "avatar.png");
   } catch (e: any) {
     error.value = String(e?.message ?? e);
+    errorScope.value = "sidebar";
   }
 }
 
 async function onSaveNewToLibrary() {
   libraryMessage.value = null;
   error.value = null;
+  errorScope.value = null;
   if (!window.confirm("Save new card?")) return;
   if (libraryFormat.value === "png" && !avatarUrl.value) {
     error.value = "No avatar image to save as PNG.";
+    errorScope.value = "sidebar";
     return;
   }
   savingLibrary.value = true;
   try {
     const payload = buildCardPayload();
-    const res = await saveToLibrary(payload, avatarUrl.value ?? null, libraryFormat.value);
+    const repoId = targetLibraryRepoId.value;
+    const res = await saveToLibrary(payload, avatarUrl.value ?? null, libraryFormat.value, repoId);
     if (!res.ok) {
       error.value = res.error ?? "Failed to save to library.";
+      errorScope.value = "sidebar";
       return;
     }
-    libraryMessage.value = `Saved to ${res.dir}`;
+    libraryMessage.value = `Saved to ${repoLabel(repoId)}`;
   } catch (e: any) {
     error.value = String(e?.message ?? e);
+    errorScope.value = "sidebar";
   } finally {
     savingLibrary.value = false;
   }
@@ -524,25 +583,31 @@ async function onSaveNewToLibrary() {
 async function onUpdateLibrary() {
   libraryMessage.value = null;
   error.value = null;
+  errorScope.value = null;
   if (!libraryId.value) {
     error.value = "No library item selected to update.";
+    errorScope.value = "sidebar";
     return;
   }
   if (libraryFormat.value === "png" && !avatarUrl.value) {
     error.value = "No avatar image to save as PNG.";
+    errorScope.value = "sidebar";
     return;
   }
   savingLibrary.value = true;
   try {
     const payload = buildCardPayload();
-    const res = await updateLibraryItem(libraryId.value, payload, avatarUrl.value ?? null, libraryFormat.value);
+    const repoId = libraryRepoId.value || targetLibraryRepoId.value;
+    const res = await updateLibraryItem(libraryId.value, payload, avatarUrl.value ?? null, libraryFormat.value, repoId);
     if (!res.ok) {
       error.value = res.error ?? "Failed to update library item.";
+      errorScope.value = "sidebar";
       return;
     }
-    libraryMessage.value = `Updated in ${res.dir}`;
+    libraryMessage.value = `Updated in ${repoLabel(repoId)}`;
   } catch (e: any) {
     error.value = String(e?.message ?? e);
+    errorScope.value = "sidebar";
   } finally {
     savingLibrary.value = false;
   }
@@ -552,6 +617,7 @@ function onResetCharacter() {
   characterStore.reset();
   idea.value = "";
   error.value = null;
+  errorScope.value = null;
   regenError.value = null;
   fillError.value = null;
   imageError.value = null;
@@ -662,7 +728,7 @@ async function onImportFileChange(event: Event) {
     if (data.avatarDataUrl) {
       avatarUrl.value = data.avatarDataUrl;
     }
-    characterStore.setLibraryId(null);
+    characterStore.setLibraryContext(null, null);
   } catch (e: any) {
     importError.value = String(e?.message ?? e);
   } finally {
@@ -709,14 +775,32 @@ onUnmounted(() => {
         <div class="card">
           <h2>Avatar</h2>
           <div class="avatar">
-            <img
-              v-if="avatarUrl"
-              :src="avatarUrl"
-              alt="Avatar preview"
-              class="avatarImg"
-              @click="showImageOverlay = true"
-            />
-            <div v-else class="placeholder">No image yet</div>
+            <div class="avatar-wrap">
+              <img
+                v-if="avatarUrl"
+                :src="avatarUrl"
+                alt="Avatar preview"
+                class="avatarImg avatar-img"
+                @click="showImageOverlay = true"
+              />
+              <div v-else class="placeholder avatar-placeholder">No image yet</div>
+
+              <div v-if="generatingImage && imageJob" class="avatar-overlay">
+                <div class="avatar-overlay-card">
+                  <div class="spinner"></div>
+                  <div class="overlay-text">
+                    <div class="overlay-title">
+                      {{ imageJob.state }}
+                      <span v-if="imageJob.progress !== undefined"> • {{ Math.round(imageJob.progress * 100) }}%</span>
+                    </div>
+                    <div v-if="imageJob.message" class="overlay-sub">{{ imageJob.message }}</div>
+                  </div>
+                  <button class="btn-ghost" type="button" @click="onCancelImageJob()">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
           <p v-if="lastSeed !== null" class="help">seed: {{ lastSeed }}</p>
           <p v-if="regenerating" class="pill regen-status">
@@ -729,28 +813,7 @@ onUnmounted(() => {
         </div>
 
         <div class="card actions">
-          <h2>Actions</h2>
-          <button class="btn-primary w-full" @click="onGenerate" :disabled="generating">
-            {{ generating ? "Generating..." : "Generate" }}
-          </button>
-
-          <div class="actions-row">
-            <button class="btn-ghost" @click="onFillMissing" :disabled="fillingMissing">
-              {{ fillingMissing ? "Filling..." : "Fill missing fields" }}
-            </button>
-            <button class="btn-ghost" @click="openRegenModal" :disabled="regenerating">
-              <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
-                <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              </svg>
-              <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              </svg>
-              {{ regenerating ? "Regenerating..." : "Regenerate..." }}
-            </button>
-          </div>
-          <p v-if="regenError" class="alert-error regenErrorInline">{{ regenError }}</p>
+          <h2>Tools</h2>
 
           <div class="actions-group">
             <div class="actions-title">Image</div>
@@ -782,6 +845,14 @@ onUnmounted(() => {
               >
                 {{ savingLibrary ? "Saving..." : "Save to Library" }}
               </button>
+              <label class="field inline-field">
+                <span class="label">Repository</span>
+                <select v-model="targetLibraryRepoId" class="select">
+                  <option v-for="repo in libraryRepos" :key="repo.id" :value="repo.id">
+                    {{ repo.name }}
+                  </option>
+                </select>
+              </label>
               <label class="field inline-field">
                 <span class="label">Library Save Format</span>
                 <select v-model="libraryFormat" class="select">
@@ -833,15 +904,9 @@ onUnmounted(() => {
             />
           </div>
 
-          <p v-if="error" class="alert-error">{{ error }}</p>
+          <p v-if="error && errorScope === 'sidebar'" class="alert-error">{{ error }}</p>
           <p v-if="libraryMessage" class="muted">{{ libraryMessage }}</p>
-          <p v-if="fillError" class="alert-error">{{ fillError }}</p>
           <p v-if="importError" class="alert-error">{{ importError }}</p>
-          <details v-if="errorRaw || issueText" class="details">
-            <summary>Details</summary>
-            <pre v-if="issueText">{{ issueText }}</pre>
-            <pre v-if="errorRaw">{{ errorRaw }}</pre>
-          </details>
           <p v-if="imageError" class="alert-error">{{ imageError }}</p>
         </div>
       </aside>
@@ -908,6 +973,40 @@ onUnmounted(() => {
                 <textarea v-model="lorebook" rows="4" class="textarea" placeholder="Lorebook snippets..."></textarea>
               </label>
             </details>
+
+            <div class="inputs-actions">
+              <button class="btn-primary w-full" @click="onGenerate" :disabled="generating">
+                {{ generating ? "Generating..." : "Generate" }}
+              </button>
+
+              <div class="actions-row">
+                <button class="btn-ghost" @click="onFillMissing" :disabled="fillingMissing">
+                  {{ fillingMissing ? "Filling..." : "Fill missing fields" }}
+                </button>
+
+                <button class="btn-ghost" @click="openRegenModal" :disabled="regenerating">
+                  <svg v-if="regenerating" class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.25" />
+                    <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 6v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M20 11a8 8 0 1 0 2 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  {{ regenerating ? "Regenerating..." : "Regenerate..." }}
+                </button>
+              </div>
+
+              <p v-if="error && errorScope === 'inputs'" class="alert-error">{{ error }}</p>
+              <p v-if="fillError" class="alert-error">{{ fillError }}</p>
+              <p v-if="regenError" class="alert-error">{{ regenError }}</p>
+
+              <details v-if="(errorRaw || issueText) && errorScope === 'inputs'" class="details">
+                <summary>Details</summary>
+                <pre v-if="issueText">{{ issueText }}</pre>
+                <pre v-if="errorRaw">{{ errorRaw }}</pre>
+              </details>
+            </div>
           </CollapsiblePanel>
         </div>
 
@@ -1167,7 +1266,7 @@ onUnmounted(() => {
 
     <div v-if="showImageOverlay" class="overlay" @click.self="showImageOverlay = false">
       <button class="overlayClose" @click="showImageOverlay = false" aria-label="Close">X</button>
-      <img class="overlayImg" :src="avatarUrl" alt="Avatar full size" />
+      <img class="overlayImg" :src="avatarUrl ?? undefined" alt="Avatar full size" />
     </div>
   </section>
 </template>
@@ -1288,6 +1387,13 @@ onUnmounted(() => {
   display: grid;
   gap: 8px;
 }
+.inputs-actions {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-2);
+  display: grid;
+  gap: 10px;
+}
 .actions-title {
   font-size: 12px;
   color: var(--muted);
@@ -1379,6 +1485,60 @@ pre {
 .avatarImg {
   cursor: zoom-in;
 }
+.avatar-wrap {
+  position: relative;
+  display: inline-block;
+}
+.avatar-img {
+  display: block;
+}
+.avatar-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+}
+.avatar-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(20, 20, 20, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  max-width: 90%;
+}
+.overlay-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.overlay-title {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overlay-sub {
+  font-size: 12px;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.9);
+  animation: spin 0.9s linear infinite;
+}
 .placeholder {
   color: var(--muted);
   font-size: 14px;
@@ -1410,6 +1570,9 @@ pre {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 .modalActions {
   display: flex;

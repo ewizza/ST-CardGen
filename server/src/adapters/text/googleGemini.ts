@@ -11,6 +11,37 @@ function truncate(text: string, max = 500) {
   return text.length > max ? text.slice(0, max) : text;
 }
 
+type FetchTextResult =
+  | { ok: true; status: number; statusText: string; text: string }
+  | { ok: false; status: number; statusText: "TIMEOUT" | "NETWORK" | string; text: string };
+
+async function fetchTextWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<FetchTextResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, signal: controller.signal });
+    } catch (e: any) {
+      if (e?.name === "AbortError") {
+        return { ok: false, status: 0, statusText: "TIMEOUT", text: `Request timed out after ${timeoutMs}ms` };
+      }
+      return { ok: false, status: 0, statusText: "NETWORK", text: String(e?.message ?? e) };
+    }
+    const text = await res.text().catch(() => "");
+    if (!res.ok) return { ok: false, status: res.status, statusText: res.statusText, text };
+    return { ok: true, status: res.status, statusText: res.statusText, text };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function formatTimeout(providerLabel: string, timeoutMs: number, purpose: string) {
+  const sec = Math.round(timeoutMs / 1000);
+  return `${providerLabel} ${purpose} timed out after ${sec}s. ` +
+    "Increase \"Text Completion -> Request timeout\" in Settings, or reduce Max Tokens / use a shorter field preset.";
+}
+
 async function getApiKeyFromConfig() {
   const cfg = loadConfig();
   const keyName = cfg.text.googleGemini?.apiKeyRef;
@@ -20,17 +51,18 @@ async function getApiKeyFromConfig() {
   return apiKey;
 }
 
-export async function geminiListModelsWithKey(apiBaseUrl: string, apiKey?: string | null): Promise<string[]> {
+export async function geminiListModelsWithKey(apiBaseUrl: string, apiKey?: string | null, timeoutMs = 20_000): Promise<string[]> {
   if (!apiKey) throw new Error("No Google Gemini API key configured.");
   const normalized = normalizeBaseUrl(apiBaseUrl);
-  const res = await fetch(`${normalized}/models`, {
+  const r = await fetchTextWithTimeout(`${normalized}/models`, {
     headers: { "x-goog-api-key": apiKey },
-  });
-  const text = await res.text().catch(() => "");
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} ${res.statusText} ${truncate(text)}`.trim());
+  }, timeoutMs);
+  if (!r.ok) {
+    if (r.status === 0 && r.statusText === "TIMEOUT") throw new Error(formatTimeout("Gemini", timeoutMs, "model list"));
+    if (r.status === 0 && r.statusText === "NETWORK") throw new Error(`Gemini network error: ${truncate(r.text)}`.trim());
+    throw new Error(`HTTP ${r.status} ${r.statusText} ${truncate(r.text)}`.trim());
   }
-  const data = JSON.parse(text);
+  const data = JSON.parse(r.text);
   const models = Array.isArray(data?.models) ? data.models : [];
   const ids = models.map((model: any) => {
     if (typeof model?.baseModelId === "string" && model.baseModelId.trim()) return model.baseModelId.trim();
@@ -47,18 +79,25 @@ export async function geminiListModels(): Promise<string[]> {
   const cfg = loadConfig();
   const apiBaseUrl = cfg.text.googleGemini?.apiBaseUrl || "https://generativelanguage.googleapis.com/v1beta";
   const apiKey = await getApiKeyFromConfig();
-  return geminiListModelsWithKey(apiBaseUrl, apiKey);
+  const requestTimeoutMs = cfg.text.googleGemini?.requestTimeoutMs ?? 10 * 60_000;
+  const listTimeoutMs = Math.min(20_000, requestTimeoutMs);
+  return geminiListModelsWithKey(apiBaseUrl, apiKey, listTimeoutMs);
 }
 
 export async function geminiChatComplete(messages: Message[], params?: TextGenParams) {
   const cfg = loadConfig();
   const openaiBaseUrl = normalizeBaseUrl(cfg.text.googleGemini?.openaiBaseUrl || "https://generativelanguage.googleapis.com/v1beta/openai/");
   const apiKey = await getApiKeyFromConfig();
+  const requestTimeoutMs = cfg.text.googleGemini?.requestTimeoutMs ?? 10 * 60_000;
 
   let chosenModel = cfg.text.googleGemini?.model;
   if (!chosenModel) {
-    const models = await geminiListModels();
-    chosenModel = models.find((m) => m.startsWith("gemini")) || models[0];
+    try {
+      const models = await geminiListModels();
+      chosenModel = models.find((m) => m.startsWith("gemini")) || models[0];
+    } catch {
+      chosenModel = undefined;
+    }
   }
   if (!chosenModel) chosenModel = "gemini-3-flash-preview";
 
@@ -74,19 +113,20 @@ export async function geminiChatComplete(messages: Message[], params?: TextGenPa
   if (top_p !== undefined) body.top_p = top_p;
   if (max_tokens !== undefined) body.max_tokens = max_tokens;
 
-  const res = await fetch(`${openaiBaseUrl}/chat/completions`, {
+  const r = await fetchTextWithTimeout(`${openaiBaseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
-  });
-  const text = await res.text().catch(() => "");
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} ${res.statusText} ${truncate(text)}`.trim());
+  }, requestTimeoutMs);
+  if (!r.ok) {
+    if (r.status === 0 && r.statusText === "TIMEOUT") throw new Error(formatTimeout("Gemini", requestTimeoutMs, "request"));
+    if (r.status === 0 && r.statusText === "NETWORK") throw new Error(`Gemini network error: ${truncate(r.text)}`.trim());
+    throw new Error(`HTTP ${r.status} ${r.statusText} ${truncate(r.text)}`.trim());
   }
-  const json = JSON.parse(text);
+  const json = JSON.parse(r.text);
   const content = json?.choices?.[0]?.message?.content;
   if (typeof content !== "string") throw new Error("Gemini response missing content.");
   return content;

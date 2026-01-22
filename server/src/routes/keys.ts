@@ -55,14 +55,18 @@ keysRouter.post("/validate", async (req, res) => {
     if (provider === "openai_compat") {
       const cfg = loadConfig();
       const baseUrl = cfg.text.openaiCompat?.baseUrl || "http://127.0.0.1:1234/v1";
-      const ok = await openaiPingWithKey(baseUrl, apiKey);
+      const requestTimeoutMs = cfg.text.openaiCompat?.requestTimeoutMs ?? 10 * 60_000;
+      const listTimeoutMs = Math.min(20_000, requestTimeoutMs);
+      const ok = await openaiPingWithKey(baseUrl, apiKey, listTimeoutMs);
       return res.json({ ok });
     }
 
     if (provider === "google_gemini") {
       const cfg = loadConfig();
       const apiBaseUrl = cfg.text.googleGemini?.apiBaseUrl || "https://generativelanguage.googleapis.com/v1beta";
-      const models = await geminiListModelsWithKey(apiBaseUrl, apiKey);
+      const requestTimeoutMs = cfg.text.googleGemini?.requestTimeoutMs ?? 10 * 60_000;
+      const listTimeoutMs = Math.min(20_000, requestTimeoutMs);
+      const models = await geminiListModelsWithKey(apiBaseUrl, apiKey, listTimeoutMs);
       return res.json({ ok: models.length > 0 });
     }
 

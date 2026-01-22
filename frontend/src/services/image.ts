@@ -15,6 +15,7 @@ export type GenerateImageResponse = {
 
   promptId?: string;
   seed?: number;
+  jobId?: string;
 
   // server returns this when it finds an image
   imageUrl?: string;
@@ -84,4 +85,81 @@ export function connectImageProvider(provider: "comfyui" | "sdapi" | "koboldcpp"
 
 export function listComfyWorkflows() {
   return httpJson<ListComfyWorkflowsResponse>("/api/image/comfyui/workflows");
+}
+
+export type ImageJobState = "queued" | "running" | "done" | "error" | "canceled";
+
+export type ImageJob = {
+  id: string;
+  createdAt?: string;
+  updatedAt?: string;
+  state: ImageJobState;
+  progress?: number; // 0..1
+  message?: string;
+  error?: string;
+  details?: any;
+  result?: {
+    imageUrl?: string;
+    filename?: string;
+    subfolder?: string;
+    type?: string;
+  };
+};
+
+export type GetImageJobResponse = {
+  ok: boolean;
+  jobId?: string;
+  error?: string;
+  job?: ImageJob;
+};
+
+export function getImageJob(jobId: string) {
+  return httpJson<GetImageJobResponse>(`/api/image/job/${encodeURIComponent(jobId)}`);
+}
+
+export type CancelImageJobResponse = {
+  ok: boolean;
+  error?: string;
+  job?: ImageJob;
+};
+
+export function cancelImageJob(jobId: string) {
+  return httpJson<CancelImageJobResponse>(`/api/image/job/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+  });
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function waitForImageJob(
+  jobId: string,
+  opts?: {
+    intervalMs?: number;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    onUpdate?: (job: ImageJob) => void;
+  },
+): Promise<ImageJob> {
+  const intervalMs = opts?.intervalMs ?? 900;
+  const timeoutMs = opts?.timeoutMs ?? 10 * 60 * 1000; // 10 minutes
+  const started = Date.now();
+
+  while (true) {
+    if (opts?.signal?.aborted) throw new Error("Canceled");
+
+    const res = await getImageJob(jobId);
+    if (!res.ok || !res.job) throw new Error(res.error ?? "Job poll failed.");
+
+    opts?.onUpdate?.(res.job);
+
+    if (res.job.state === "done") return res.job;
+    if (res.job.state === "error") throw new Error(res.job.error ?? "Job failed.");
+    if (res.job.state === "canceled") throw new Error("Canceled");
+
+    if (Date.now() - started > timeoutMs) throw new Error("Timed out waiting for image job.");
+
+    await sleep(intervalMs);
+  }
 }

@@ -52,6 +52,55 @@ function migrateConfig(raw: any) {
       }
     }
   }
+  if (next?.library && typeof next.library === "object") {
+    const libDefaults = defaultConfig().library;
+    if (typeof next.library.dir !== "string" || !next.library.dir.trim()) {
+      next.library.dir = libDefaults.dir;
+      changed = true;
+    }
+
+    const legacyDir = next.library.dir || libDefaults.dir;
+    if (!Array.isArray(next.library.repositories)) {
+      next.library.repositories = [{
+        id: "cardgen",
+        name: "CardGen",
+        dir: legacyDir,
+        kind: "managed",
+        readOnly: false,
+      }];
+      changed = true;
+    }
+
+    const repos = next.library.repositories as Array<any>;
+    let cardgen = repos.find((repo) => repo && repo.id === "cardgen");
+    if (!cardgen) {
+      cardgen = { id: "cardgen", name: "CardGen", dir: legacyDir, kind: "managed", readOnly: false };
+      repos.unshift(cardgen);
+      changed = true;
+    }
+    if (typeof cardgen.dir !== "string" || !cardgen.dir.trim()) {
+      cardgen.dir = legacyDir;
+      changed = true;
+    }
+    if (legacyDir && cardgen.dir !== legacyDir) {
+      cardgen.dir = legacyDir;
+      changed = true;
+    }
+    if (!next.library.dir || next.library.dir !== cardgen.dir) {
+      next.library.dir = cardgen.dir;
+      changed = true;
+    }
+
+    if (typeof next.library.activeRepoId !== "string" || !next.library.activeRepoId.trim()) {
+      next.library.activeRepoId = "cardgen";
+      changed = true;
+    }
+    const activeExists = repos.some((repo) => repo && repo.id === next.library.activeRepoId);
+    if (!activeExists) {
+      next.library.activeRepoId = repos[0]?.id || "cardgen";
+      changed = true;
+    }
+  }
   if (next?.text && typeof next.text === "object") {
     const textDefaults = defaultConfig().text;
     if (!next.text.koboldcpp || typeof next.text.koboldcpp !== "object") {
@@ -68,6 +117,13 @@ function migrateConfig(raw: any) {
       next.text.koboldcpp.defaultParams.max_tokens = textDefaults.koboldcpp.defaultParams.max_tokens;
       changed = true;
     }
+    if (
+      next.text.koboldcpp.requestTimeoutMs === undefined &&
+      textDefaults.koboldcpp.requestTimeoutMs !== undefined
+    ) {
+      next.text.koboldcpp.requestTimeoutMs = textDefaults.koboldcpp.requestTimeoutMs;
+      changed = true;
+    }
     if (!next.text.openaiCompat || typeof next.text.openaiCompat !== "object") {
       next.text.openaiCompat = { ...textDefaults.openaiCompat };
       changed = true;
@@ -76,12 +132,26 @@ function migrateConfig(raw: any) {
       next.text.openaiCompat.defaultParams = { ...textDefaults.openaiCompat.defaultParams };
       changed = true;
     }
+    if (
+      next.text.openaiCompat.requestTimeoutMs === undefined &&
+      textDefaults.openaiCompat.requestTimeoutMs !== undefined
+    ) {
+      next.text.openaiCompat.requestTimeoutMs = textDefaults.openaiCompat.requestTimeoutMs;
+      changed = true;
+    }
     if (!next.text.googleGemini || typeof next.text.googleGemini !== "object") {
       next.text.googleGemini = { ...textDefaults.googleGemini };
       changed = true;
     }
     if (!next.text.googleGemini.defaultParams || typeof next.text.googleGemini.defaultParams !== "object") {
       next.text.googleGemini.defaultParams = { ...textDefaults.googleGemini.defaultParams };
+      changed = true;
+    }
+    if (
+      next.text.googleGemini.requestTimeoutMs === undefined &&
+      textDefaults.googleGemini.requestTimeoutMs !== undefined
+    ) {
+      next.text.googleGemini.requestTimeoutMs = textDefaults.googleGemini.requestTimeoutMs;
       changed = true;
     }
     if (typeof next.text.baseUrl === "string" && next.text.baseUrl.length) {

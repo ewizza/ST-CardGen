@@ -7,10 +7,12 @@ import { getComfyBaseUrl, getObjectInfo } from "../adapters/comfyui/client.js";
 import { applyBindings, roundTo64, type BindingsMap } from "../adapters/comfyui/bindings.js";
 import { extractSamplers, extractSchedulers } from "../adapters/comfyui/parse.js";
 import { listWorkflows, loadBindingsForWorkflow, loadWorkflow } from "../domain/comfyui/workflows.js";
+import { createComfyJob, updateJob } from "../domain/jobs/imageJobs.js";
 import { stabilityGenerate } from "../providers/stability.js";
 import { huggingfaceTextToImage } from "../providers/huggingface.js";
 import { generateGoogleImage } from "../providers/google.js";
 import { getKey } from "../services/keyStore.js";
+import { httpGetJson, httpPostJson, isHttpRequestError } from "../utils/http.js";
 
 export const imageRouter = Router();
 
@@ -46,16 +48,11 @@ const GenerateSchema = z.object({
   outputFormat: z.enum(["png", "webp", "jpeg"]).optional(),
 });
 
-async function postJson(url: string, body: any) {
-  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
-  return r.json();
-}
-async function getJson(url: string) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
-  return r.json();
-}
+const TIMEOUT_CONNECT_MS = 8000;
+const TIMEOUT_LIST_MS = 8000;
+const TIMEOUT_SDAPI_TXT2IMG_MS = 120000;
+const TIMEOUT_COMFY_PROMPT_MS = 15000;
+const TIMEOUT_COMFY_HISTORY_MS = 8000;
 
 function normalizeBaseUrl(url: string) {
   return url.replace(/\/+$/, "");
@@ -122,6 +119,9 @@ imageRouter.get("/comfyui/workflows", async (req, res) => {
     const workflows = await listWorkflows();
     return res.json({ ok: true, workflows });
   } catch (e: any) {
+    if (isHttpRequestError(e)) {
+      return res.status(200).json({ ok: false, error: e.message, details: e.details });
+    }
     return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
   }
 });
@@ -147,22 +147,16 @@ imageRouter.get("/samplers", async (req, res) => {
 
     if (cfg.image.provider === "sdapi" || cfg.image.provider === "koboldcpp") {
       baseUrl = normalizeBaseUrl(cfg.image.baseUrls?.[cfg.image.provider] || "");
-      const resp = await fetch(`${baseUrl}/sdapi/v1/samplers`);
-      if (!resp.ok) {
-        return res.status(200).json({
-          ok: false,
-          error: `HTTP ${resp.status} ${resp.statusText}`,
-          provider,
-          baseUrl,
-        });
-      }
-      const data = await resp.json();
+      const data = await httpGetJson(`${baseUrl}/sdapi/v1/samplers`, { timeoutMs: TIMEOUT_LIST_MS });
       const samplers = parseStringList(data);
       return res.json({ ok: true, provider, baseUrl, samplers });
     }
 
     return res.json({ ok: true, provider, samplers: [] });
   } catch (e: any) {
+    if (isHttpRequestError(e)) {
+      return res.status(200).json({ ok: false, error: e.message, details: e.details, provider, baseUrl });
+    }
     return res.status(200).json({ ok: false, error: String(e?.message ?? e), provider, baseUrl });
   }
 });
@@ -188,23 +182,29 @@ imageRouter.get("/schedulers", async (req, res) => {
 
     if (cfg.image.provider === "sdapi" || cfg.image.provider === "koboldcpp") {
       baseUrl = normalizeBaseUrl(cfg.image.baseUrls?.[cfg.image.provider] || "");
-      const resp = await fetch(`${baseUrl}/sdapi/v1/schedulers`);
-      if (!resp.ok) {
-        return res.json({
-          ok: true,
-          provider,
-          baseUrl,
-          schedulers: [],
-          warning: "Endpoint not available",
-        });
+      try {
+        const data = await httpGetJson(`${baseUrl}/sdapi/v1/schedulers`, { timeoutMs: TIMEOUT_LIST_MS });
+        const schedulers = parseStringList(data);
+        return res.json({ ok: true, provider, baseUrl, schedulers });
+      } catch (e: any) {
+        if (isHttpRequestError(e) && (e.details.status === 404 || e.details.status === 405)) {
+          return res.json({
+            ok: true,
+            provider,
+            baseUrl,
+            schedulers: [],
+            warning: "Endpoint not available",
+          });
+        }
+        throw e;
       }
-      const data = await resp.json();
-      const schedulers = parseStringList(data);
-      return res.json({ ok: true, provider, baseUrl, schedulers });
     }
 
     return res.json({ ok: true, provider, schedulers: [] });
   } catch (e: any) {
+    if (isHttpRequestError(e)) {
+      return res.status(200).json({ ok: false, error: e.message, details: e.details, provider, baseUrl });
+    }
     return res.status(200).json({ ok: false, error: String(e?.message ?? e), provider, baseUrl });
   }
 });
@@ -243,7 +243,7 @@ imageRouter.post("/connect", async (req, res) => {
       samplers = extractSamplers(info);
       schedulers = extractSchedulers(info);
       const workflows = await listWorkflows();
-      const details = { hasObjectInfo: true, workflows };
+      details = { hasObjectInfo: true, workflows };
       ok = true;
       cfg.image.providerInfo = cfg.image.providerInfo || {};
       cfg.image.providerInfo[provider] = {
@@ -280,6 +280,7 @@ imageRouter.post("/connect", async (req, res) => {
         schedulers,
         warning,
         error,
+        details,
       };
       saveConfig(cfg);
       return res.json({ ok, provider, baseUrl, samplers, schedulers, warning, error, checkedAt });
@@ -294,16 +295,16 @@ imageRouter.post("/connect", async (req, res) => {
           ok = false;
           error = "Selected API key not found.";
         } else {
-          const whoamiResp = await fetch("https://huggingface.co/api/whoami-v2", {
-            headers: { Authorization: `Bearer ${apiKey}` },
-          });
-          if (!whoamiResp.ok) {
-            ok = false;
-            const text = await whoamiResp.text().catch(() => "");
-            error = `HTTP ${whoamiResp.status} ${whoamiResp.statusText}${text ? ` - ${text}` : ""}`;
-          } else {
+          try {
+            details = await httpGetJson("https://huggingface.co/api/whoami-v2", {
+              timeoutMs: 10000,
+              headers: { Authorization: `Bearer ${apiKey}` },
+            });
             ok = true;
-            details = await whoamiResp.json().catch(() => undefined);
+          } catch (e: any) {
+            ok = false;
+            error = String(e?.message ?? e);
+            if (isHttpRequestError(e)) details = e.details;
           }
         }
       }
@@ -344,25 +345,31 @@ imageRouter.post("/connect", async (req, res) => {
         schedulers,
         warning,
         error,
+        details,
       };
       saveConfig(cfg);
       return res.json({ ok, provider, baseUrl, samplers, schedulers, warning, error, checkedAt });
     } else {
-      const samplersResp = await fetch(`${baseUrl}/sdapi/v1/samplers`);
-      if (!samplersResp.ok) {
-        error = `HTTP ${samplersResp.status} ${samplersResp.statusText}`;
-      } else {
-        const data = await samplersResp.json();
+      try {
+        const data = await httpGetJson(`${baseUrl}/sdapi/v1/samplers`, { timeoutMs: TIMEOUT_CONNECT_MS });
         samplers = parseStringList(data);
         ok = true;
+      } catch (e: any) {
+        ok = false;
+        error = String(e?.message ?? e);
+        if (isHttpRequestError(e)) details = e.details;
       }
 
-      const schedulersResp = await fetch(`${baseUrl}/sdapi/v1/schedulers`);
-      if (!schedulersResp.ok) {
-        warning = "Endpoint not available";
-      } else {
-        const data = await schedulersResp.json();
+      try {
+        const data = await httpGetJson(`${baseUrl}/sdapi/v1/schedulers`, { timeoutMs: TIMEOUT_CONNECT_MS });
         schedulers = parseStringList(data);
+      } catch (e: any) {
+        if (isHttpRequestError(e) && (e.details.status === 404 || e.details.status === 405)) {
+          warning = "Endpoint not available";
+        } else {
+          error = error || String(e?.message ?? e);
+          if (isHttpRequestError(e)) details = details || e.details;
+        }
       }
     }
     cfg.image.providerInfo = cfg.image.providerInfo || {};
@@ -374,11 +381,15 @@ imageRouter.post("/connect", async (req, res) => {
       schedulers,
       warning,
       error,
+      details,
     };
     saveConfig(cfg);
 
-    return res.json({ ok, provider, baseUrl, samplers, schedulers, warning, error, checkedAt });
+    return res.json({ ok, provider, baseUrl, samplers, schedulers, warning, error, checkedAt, details });
   } catch (e: any) {
+    if (isHttpRequestError(e)) {
+      return res.status(200).json({ ok: false, error: e.message, details: e.details, provider, baseUrl });
+    }
     return res.status(200).json({ ok: false, error: String(e?.message ?? e), provider, baseUrl });
   }
 });
@@ -417,6 +428,9 @@ imageRouter.post("/generate", async (req, res) => {
           imageUrl: `/api/image/result/${encodeURIComponent(id)}`,
         });
       } catch (e: any) {
+        if (isHttpRequestError(e)) {
+          return res.status(200).json({ ok: false, provider, error: e.message, details: e.details });
+        }
         return res.status(200).json({
           ok: false,
           provider,
@@ -455,6 +469,9 @@ imageRouter.post("/generate", async (req, res) => {
           meta: { provider, model, hfProvider },
         });
       } catch (e: any) {
+        if (isHttpRequestError(e)) {
+          return res.status(200).json({ ok: false, provider, error: e.message, details: e.details });
+        }
         return res.status(200).json({
           ok: false,
           provider,
@@ -489,6 +506,9 @@ imageRouter.post("/generate", async (req, res) => {
           imageUrl: `/output/${encodeURIComponent(result.filename)}`,
         });
       } catch (e: any) {
+        if (isHttpRequestError(e)) {
+          return res.status(200).json({ ok: false, provider, error: e.message, details: e.details });
+        }
         return res.status(200).json({
           ok: false,
           provider,
@@ -512,7 +532,18 @@ imageRouter.post("/generate", async (req, res) => {
       if (cfg.image.sampler) payload.sampler_name = cfg.image.sampler;
       if (cfg.image.scheduler) payload.scheduler = cfg.image.scheduler;
 
-      const out = await postJson(`${baseUrl}/sdapi/v1/txt2img`, payload);
+      let out: any;
+      try {
+        out = await httpPostJson(`${baseUrl}/sdapi/v1/txt2img`, payload, {
+          timeoutMs: TIMEOUT_SDAPI_TXT2IMG_MS,
+          maxBodyChars: 2000,
+        });
+      } catch (e: any) {
+        if (isHttpRequestError(e)) {
+          return res.status(200).json({ ok: false, provider, error: e.message, details: e.details, baseUrl });
+        }
+        return res.status(200).json({ ok: false, provider, error: String(e?.message ?? e), baseUrl });
+      }
       const firstImage = Array.isArray(out?.images) ? out.images[0] : null;
       if (!firstImage || typeof firstImage !== "string") {
         return res.status(200).json({ ok: false, provider, error: "SDAPI did not return any images", out });
@@ -554,41 +585,25 @@ imageRouter.post("/generate", async (req, res) => {
     applyLoraSettings(patched, cfg);
 
     // Submit
-    const submit = await postJson(`${baseUrl}/prompt`, { prompt: patched });
+    let submit: any;
+    try {
+      submit = await httpPostJson(`${baseUrl}/prompt`, { prompt: patched }, { timeoutMs: TIMEOUT_COMFY_PROMPT_MS });
+    } catch (e: any) {
+      if (isHttpRequestError(e)) {
+        return res.status(200).json({ ok: false, error: e.message, details: e.details });
+      }
+      return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    }
     const promptId = submit?.prompt_id;
     if (!promptId) return res.status(200).json({ ok: false, error: "ComfyUI did not return prompt_id", submit });
 
-    // Poll history
-    const timeoutMs = 90_000;
-    const intervalMs = 750;
-    const start = Date.now();
-
-    while (Date.now() - start < timeoutMs) {
-      const hist = await getJson(`${baseUrl}/history/${encodeURIComponent(promptId)}`);
-
-      const img = extractFirstImage(hist);
-      if (img) {
-        const viewUrl = `/api/comfyui/view?` + new URLSearchParams({
-          filename: img.filename,
-          type: img.type || "output",
-          subfolder: img.subfolder || ""
-        }).toString();
-
-        return res.json({
-          ok: true,
-          provider,
-          promptId,
-          seed,
-          image: img,
-          imageUrl: viewUrl
-        });
-      }
-
-      await new Promise(r => setTimeout(r, intervalMs));
-    }
-
-    return res.status(200).json({ ok: false, provider, error: "Timed out waiting for ComfyUI result", promptId });
+    const job = createComfyJob(baseUrl, promptId);
+    updateJob(job.id, { state: "running", message: "Submitted to ComfyUI", progress: 0.1 });
+    return res.json({ ok: true, provider: "comfyui", jobId: job.id, promptId });
   } catch (e: any) {
+    if (isHttpRequestError(e)) {
+      return res.status(200).json({ ok: false, error: e.message, details: e.details });
+    }
     return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
   }
 });

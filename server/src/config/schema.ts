@@ -9,6 +9,7 @@ export const ConfigSchema = z.object({
     koboldcpp: z.object({
       baseUrl: z.string().default("http://127.0.0.1:5001"),
       model: z.string().optional(),
+      requestTimeoutMs: z.number().int().min(1000).max(60 * 60 * 1000).default(10 * 60 * 1000),
       defaultParams: z.object({
         temperature: z.number().optional(),
         top_p: z.number().optional(),
@@ -19,6 +20,7 @@ export const ConfigSchema = z.object({
       baseUrl: z.string().default("http://127.0.0.1:1234/v1"),
       apiKeyRef: z.string().optional(),
       model: z.string().optional(),
+      requestTimeoutMs: z.number().int().min(1000).max(60 * 60 * 1000).default(10 * 60 * 1000),
       defaultParams: z.object({
         temperature: z.number().optional(),
         top_p: z.number().optional(),
@@ -30,6 +32,7 @@ export const ConfigSchema = z.object({
       apiBaseUrl: z.string().default("https://generativelanguage.googleapis.com/v1beta"),
       apiKeyRef: z.string().optional(),
       model: z.string().optional(),
+      requestTimeoutMs: z.number().int().min(1000).max(60 * 60 * 1000).default(10 * 60 * 1000),
       defaultParams: z.object({
         temperature: z.number().optional(),
         top_p: z.number().optional(),
@@ -177,10 +180,30 @@ export const ConfigSchema = z.object({
   ,
   library: z.object({
     dir: z.string().default(defaultLibraryDir),
+    activeRepoId: z.string().default("cardgen"),
+    repositories: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      dir: z.string(),
+      kind: z.enum(["managed", "folder"]).default("managed"),
+      readOnly: z.boolean().default(false),
+    })).default([{ id: "cardgen", name: "CardGen", dir: defaultLibraryDir, kind: "managed", readOnly: false }]),
   }).default({})
   ,
   generation: z.object({
     contentRating: z.enum(["sfw", "nsfw_allowed"]).default("nsfw_allowed"),
+    fieldDetail: z.object({
+      profile: z.enum(["short", "detailed", "verbose"]).default("detailed"),
+      overrides: z.object({
+        description: z.enum(["inherit", "short", "detailed", "verbose"]).optional(),
+        personality: z.enum(["inherit", "short", "detailed", "verbose"]).optional(),
+        scenario: z.enum(["inherit", "short", "detailed", "verbose"]).optional(),
+        first_mes: z.enum(["inherit", "short", "detailed", "verbose"]).optional(),
+        mes_example: z.enum(["inherit", "short", "detailed", "verbose"]).optional(),
+        creator_notes: z.enum(["inherit", "short", "detailed", "verbose"]).optional(),
+        tags: z.enum(["inherit", "short", "detailed", "verbose"]).optional(),
+      }).default({}),
+    }).default({}),
   }).default({})
 });
 

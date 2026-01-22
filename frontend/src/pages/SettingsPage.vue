@@ -5,7 +5,9 @@ import ImageSettingsModal from "@/components/modals/ImageSettingsModal.vue";
 import FolderPickerModal from "@/components/modals/FolderPickerModal.vue";
 import CollapsiblePanel from "@/components/ui/CollapsiblePanel.vue";
 import ApiKeySelector from "@/components/ui/ApiKeySelector.vue";
-import { setLibraryConfig } from "@/services/library";
+import DebouncedNumberInput from "@/components/ui/DebouncedNumberInput.vue";
+import { getLibraryConfig, saveLibraryConfig, type LibraryRepo } from "@/services/library";
+import type { FieldDetailProfile, FieldOverrideMode, FieldKey } from "@/services/config";
 import { listTextModels, pingTextProvider } from "@/services/text";
 import { useConfigStore } from "@/stores/configStore";
 
@@ -13,15 +15,20 @@ type SettingsPanels = {
   text: boolean;
   image: boolean;
   content: boolean;
+  fieldDetail: boolean;
   library: boolean;
 };
 
 const cfg = useConfigStore();
-const pickerOpen = ref(false);
-const saving = ref(false);
-const error = ref<string | null>(null);
+const libraryPickerOpen = ref(false);
+const libraryPickerTarget = ref<{ type: "new" | "existing"; index?: number } | null>(null);
+const libraryLoading = ref(false);
+const librarySaving = ref(false);
+const libraryError = ref<string | null>(null);
 const savingContent = ref(false);
 const contentError = ref<string | null>(null);
+const savingFieldDetail = ref(false);
+const fieldDetailError = ref<string | null>(null);
 const savingText = ref(false);
 const textError = ref<string | null>(null);
 const modelsLoading = ref(false);
@@ -33,19 +40,87 @@ const panels = useLocalStorage<SettingsPanels>("ccg_settings_panels_v1", {
   text: true,
   image: true,
   content: false,
+  fieldDetail: false,
   library: false,
 });
 
-const libraryDir = computed(() => cfg.config?.library?.dir || "");
+const libraryRepos = ref<LibraryRepo[]>([]);
+const libraryActiveRepoId = ref<string>("");
+const newRepoName = ref("");
+const newRepoKind = ref<"managed" | "folder">("folder");
+const newRepoReadOnly = ref(false);
+const newRepoDir = ref("");
+
+const pickerInitialPath = computed(() => {
+  const target = libraryPickerTarget.value;
+  if (!target) return "";
+  if (target.type === "new") return newRepoDir.value || "";
+  if (typeof target.index === "number") return libraryRepos.value[target.index]?.dir || "";
+  return "";
+});
+function ensureGenerationDefaults() {
+  if (!cfg.config) return;
+  if (!cfg.config.generation) {
+    cfg.config.generation = { contentRating: "nsfw_allowed" };
+  }
+  if (!cfg.config.generation.fieldDetail) {
+    cfg.config.generation.fieldDetail = { profile: "detailed", overrides: {} };
+  }
+  if (!cfg.config.generation.fieldDetail.overrides) {
+    cfg.config.generation.fieldDetail.overrides = {};
+  }
+}
+
+function ensureFieldDetailDefaults() {
+  if (!cfg.config) return;
+  ensureGenerationDefaults();
+  cfg.config.generation.fieldDetail ??= { profile: "detailed", overrides: {} };
+  cfg.config.generation.fieldDetail.overrides ??= {};
+}
+
 const contentRating = computed({
   get: () => cfg.config?.generation?.contentRating || "nsfw_allowed",
   set: (value: "sfw" | "nsfw_allowed") => {
     if (cfg.config) {
-      if (!cfg.config.generation) cfg.config.generation = { contentRating: value };
-      else cfg.config.generation.contentRating = value;
+      ensureGenerationDefaults();
+      cfg.config.generation.contentRating = value;
     }
   },
 });
+
+const fieldDetailProfile = computed({
+  get: () => cfg.config?.generation?.fieldDetail?.profile ?? "detailed",
+  set: (value: FieldDetailProfile) => {
+    if (!cfg.config) return;
+    ensureFieldDetailDefaults();
+    cfg.config.generation.fieldDetail!.profile = value;
+  },
+});
+
+const overrideFields: Array<{ key: FieldKey; label: string }> = [
+  { key: "description", label: "Description" },
+  { key: "personality", label: "Personality" },
+  { key: "scenario", label: "Scenario" },
+  { key: "first_mes", label: "First Message" },
+  { key: "mes_example", label: "Message Examples" },
+  { key: "creator_notes", label: "Creator Notes" },
+  { key: "tags", label: "Tags" },
+];
+
+function getOverride(key: FieldKey): FieldOverrideMode {
+  return cfg.config?.generation?.fieldDetail?.overrides?.[key] ?? "inherit";
+}
+
+function setOverride(key: FieldKey, value: FieldOverrideMode) {
+  if (!cfg.config) return;
+  ensureFieldDetailDefaults();
+  const overrides = cfg.config.generation.fieldDetail!.overrides!;
+  if (value === "inherit") {
+    delete (overrides as any)[key];
+  } else {
+    overrides[key] = value;
+  }
+}
 
 const textProvider = computed({
   get: () => cfg.config?.text?.provider || "koboldcpp",
@@ -120,12 +195,14 @@ function ensureTextDefaults() {
   if (!cfg.config.text.koboldcpp) {
     cfg.config.text.koboldcpp = { baseUrl: "http://127.0.0.1:5001" };
   }
+  cfg.config.text.koboldcpp.requestTimeoutMs ??= 10 * 60 * 1000;
   if (!cfg.config.text.koboldcpp.defaultParams) {
     cfg.config.text.koboldcpp.defaultParams = { max_tokens: 896 };
   }
   if (!cfg.config.text.openaiCompat) {
     cfg.config.text.openaiCompat = { baseUrl: "http://127.0.0.1:1234/v1" };
   }
+  cfg.config.text.openaiCompat.requestTimeoutMs ??= 10 * 60 * 1000;
   if (!cfg.config.text.openaiCompat.defaultParams) {
     cfg.config.text.openaiCompat.defaultParams = {};
   }
@@ -135,6 +212,7 @@ function ensureTextDefaults() {
       apiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
     };
   }
+  cfg.config.text.googleGemini.requestTimeoutMs ??= 10 * 60 * 1000;
   if (!cfg.config.text.googleGemini.defaultParams) {
     cfg.config.text.googleGemini.defaultParams = {};
   }
@@ -154,28 +232,42 @@ function getActiveDefaultParams(ensure: boolean) {
   return cfg.config.text.koboldcpp.defaultParams ?? null;
 }
 
-const textMaxTokensInput = computed({
+const textMaxTokens = computed<number | undefined>({
   get: () => {
     const params = getActiveDefaultParams(false);
-    if (!params) return "";
-    const value = params.max_tokens;
-    return typeof value === "number" ? String(value) : "";
+    const v = params?.max_tokens;
+    return typeof v === "number" && Number.isFinite(v) ? v : undefined;
   },
-  set: (value: string) => {
+  set: (v) => {
     const params = getActiveDefaultParams(true);
     if (!params) return;
-    const raw = String(value ?? "").trim();
-    if (!raw) {
-      params.max_tokens = undefined;
-      return;
-    }
-    const parsed = Number.parseInt(raw, 10);
-    if (!Number.isFinite(parsed)) {
-      params.max_tokens = undefined;
-      return;
-    }
-    const clamped = Math.min(8196, Math.max(128, parsed));
-    params.max_tokens = clamped;
+    params.max_tokens = v;
+  },
+});
+
+const textRequestTimeoutSec = computed<number>({
+  get: () => {
+    if (!cfg.config) return 600;
+    const p = textProvider.value;
+    const ms =
+      p === "openai_compat"
+        ? cfg.config.text.openaiCompat.requestTimeoutMs
+        : p === "google_gemini"
+          ? cfg.config.text.googleGemini.requestTimeoutMs
+          : cfg.config.text.koboldcpp.requestTimeoutMs;
+
+    const sec = typeof ms === "number" && Number.isFinite(ms) ? Math.round(ms / 1000) : 600;
+    return sec;
+  },
+  set: (sec) => {
+    if (!cfg.config) return;
+    ensureTextDefaults();
+    const clamped = Math.min(3600, Math.max(5, sec || 600));
+    const ms = clamped * 1000;
+
+    if (textProvider.value === "openai_compat") cfg.config.text.openaiCompat.requestTimeoutMs = ms;
+    else if (textProvider.value === "google_gemini") cfg.config.text.googleGemini.requestTimeoutMs = ms;
+    else cfg.config.text.koboldcpp.requestTimeoutMs = ms;
   },
 });
 
@@ -187,7 +279,7 @@ async function refreshTextModels() {
     if (!res.ok) throw new Error(res.error || "Failed to load models");
     modelOptions.value = res.models ?? [];
     if (!textModel.value && modelOptions.value.length) {
-      textModel.value = modelOptions.value[0];
+      textModel.value = modelOptions.value[0] ?? "";
     }
   } catch (e: any) {
     modelsError.value = String(e?.message ?? e);
@@ -247,20 +339,131 @@ watch(
   { immediate: true }
 );
 
-async function onSelectDir(dir: string) {
-  error.value = null;
-  saving.value = true;
+watch(
+  () => panels.value.library,
+  (open) => {
+    if (open) loadLibraryConfig();
+  },
+  { immediate: true }
+);
+
+function makeRepoId(name: string) {
+  const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return base || `repo-${Date.now()}`;
+}
+
+function ensureUniqueRepoId(baseId: string) {
+  let candidate = baseId;
+  let counter = 2;
+  const hasId = (id: string) => libraryRepos.value.some((repo) => repo.id === id);
+  while (hasId(candidate)) {
+    candidate = `${baseId}-${counter}`;
+    counter += 1;
+  }
+  return candidate;
+}
+
+async function loadLibraryConfig() {
+  if (libraryLoading.value) return;
+  libraryLoading.value = true;
+  libraryError.value = null;
   try {
-    const res = await setLibraryConfig(dir);
+    const res = await getLibraryConfig();
     if (!res.ok) {
-      error.value = res.error ?? "Failed to save library folder.";
+      libraryError.value = res.error ?? "Failed to load library config.";
       return;
     }
-    if (cfg.config) cfg.config.library.dir = res.dir;
+    libraryRepos.value = res.repositories ?? [];
+    const fallbackId = res.activeRepoId || res.repositories?.[0]?.id || "";
+    const hasActive = res.repositories?.some((repo) => repo.id === res.activeRepoId);
+    libraryActiveRepoId.value = hasActive ? res.activeRepoId : fallbackId;
   } catch (e: any) {
-    error.value = String(e?.message ?? e);
+    libraryError.value = String(e?.message ?? e);
   } finally {
-    saving.value = false;
+    libraryLoading.value = false;
+  }
+}
+
+function openRepoPicker(index: number) {
+  libraryPickerTarget.value = { type: "existing", index };
+  libraryPickerOpen.value = true;
+}
+
+function openNewRepoPicker() {
+  libraryPickerTarget.value = { type: "new" };
+  libraryPickerOpen.value = true;
+}
+
+function onPickRepoDir(dir: string) {
+  libraryError.value = null;
+  const target = libraryPickerTarget.value;
+  if (!target) return;
+  if (target.type === "new") {
+    newRepoDir.value = dir;
+  } else if (typeof target.index === "number") {
+    const repo = libraryRepos.value[target.index];
+    if (repo) repo.dir = dir;
+  }
+}
+
+function addRepository() {
+  libraryError.value = null;
+  if (!newRepoName.value.trim()) {
+    libraryError.value = "Repository name is required.";
+    return;
+  }
+  if (!newRepoDir.value.trim()) {
+    libraryError.value = "Repository folder is required.";
+    return;
+  }
+  const baseId = makeRepoId(newRepoName.value);
+  const id = ensureUniqueRepoId(baseId);
+  libraryRepos.value.push({
+    id,
+    name: newRepoName.value.trim(),
+    dir: newRepoDir.value.trim(),
+    kind: newRepoKind.value,
+    readOnly: newRepoReadOnly.value,
+  });
+  newRepoName.value = "";
+  newRepoDir.value = "";
+  newRepoKind.value = "folder";
+  newRepoReadOnly.value = false;
+  if (!libraryActiveRepoId.value) libraryActiveRepoId.value = id;
+}
+
+function removeRepository(id: string) {
+  if (id === "cardgen") {
+    libraryError.value = "CardGen repository cannot be removed.";
+    return;
+  }
+  libraryRepos.value = libraryRepos.value.filter((repo) => repo.id !== id);
+  if (libraryActiveRepoId.value === id) {
+    libraryActiveRepoId.value = libraryRepos.value[0]?.id || "";
+  }
+}
+
+async function onSaveLibrarySettings() {
+  libraryError.value = null;
+  librarySaving.value = true;
+  try {
+    const res = await saveLibraryConfig({
+      activeRepoId: libraryActiveRepoId.value,
+      repositories: libraryRepos.value,
+    });
+    if (!res.ok) {
+      libraryError.value = res.error ?? "Failed to save library settings.";
+      return;
+    }
+    if (cfg.config) {
+      cfg.config.library.dir = res.dir;
+      cfg.config.library.activeRepoId = res.activeRepoId;
+      cfg.config.library.repositories = res.repositories ?? [];
+    }
+  } catch (e: any) {
+    libraryError.value = String(e?.message ?? e);
+  } finally {
+    librarySaving.value = false;
   }
 }
 
@@ -273,6 +476,19 @@ async function onSaveContentRating() {
     contentError.value = String(e?.message ?? e);
   } finally {
     savingContent.value = false;
+  }
+}
+
+async function onSaveFieldDetail() {
+  fieldDetailError.value = null;
+  savingFieldDetail.value = true;
+  try {
+    ensureGenerationDefaults();
+    await cfg.save();
+  } catch (e: any) {
+    fieldDetailError.value = String(e?.message ?? e);
+  } finally {
+    savingFieldDetail.value = false;
   }
 }
 </script>
@@ -329,14 +545,27 @@ async function onSaveContentRating() {
 
         <label class="field">
           <span>Max Tokens</span>
-          <input
-            v-model="textMaxTokensInput"
-            type="number"
-            min="128"
-            max="8196"
-            step="1"
+          <DebouncedNumberInput
+            v-model="textMaxTokens"
+            :min="128"
+            :max="8196"
+            :debounce-ms="250"
+            :allow-empty="true"
             placeholder="(unset)"
           />
+        </label>
+
+        <label class="field">
+          <span>Request timeout (seconds)</span>
+          <DebouncedNumberInput
+            v-model="textRequestTimeoutSec"
+            :min="5"
+            :max="3600"
+            :debounce-ms="250"
+            :allow-empty="false"
+            placeholder="600"
+          />
+          <small class="muted">Applies to the selected provider</small>
         </label>
 
         <div class="row">
@@ -375,20 +604,126 @@ async function onSaveContentRating() {
         <p v-if="contentError" class="error">{{ contentError }}</p>
       </CollapsiblePanel>
 
-      <CollapsiblePanel v-model="panels.library" title="Library">
-        <div class="library-row">
-          <input class="path" type="text" :value="libraryDir" readonly />
-          <button class="ghost" @click="pickerOpen = true" :disabled="saving">
-            {{ saving ? "Saving..." : "Choose..." }}
+      <CollapsiblePanel v-model="panels.fieldDetail" title="Character Field Detail">
+        <label class="field">
+          <span>Preset</span>
+          <select v-model="fieldDetailProfile">
+            <option value="short">Short</option>
+            <option value="detailed">Detailed</option>
+            <option value="verbose">Verbose</option>
+          </select>
+        </label>
+
+        <details class="details">
+          <summary>Per-field overrides</summary>
+          <div class="override-grid">
+            <label v-for="field in overrideFields" :key="field.key" class="field">
+              <span>{{ field.label }}</span>
+              <select
+                :value="getOverride(field.key)"
+                @change="setOverride(field.key, ($event.target as HTMLSelectElement).value as FieldOverrideMode)"
+              >
+                <option value="inherit">Inherit</option>
+                <option value="short">Short</option>
+                <option value="detailed">Detailed</option>
+                <option value="verbose">Verbose</option>
+              </select>
+            </label>
+          </div>
+        </details>
+
+        <div class="row">
+          <button @click="onSaveFieldDetail" :disabled="savingFieldDetail">
+            {{ savingFieldDetail ? "Saving..." : "Save Field Detail" }}
           </button>
         </div>
-        <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="fieldDetailError" class="error">{{ fieldDetailError }}</p>
+      </CollapsiblePanel>
+
+      <CollapsiblePanel v-model="panels.library" title="Library">
+        <div class="row">
+          <label class="field grow">
+            <span>Active repository</span>
+            <select v-model="libraryActiveRepoId">
+              <option v-for="repo in libraryRepos" :key="repo.id" :value="repo.id">
+                {{ repo.name }}
+              </option>
+            </select>
+          </label>
+          <button @click="onSaveLibrarySettings" :disabled="librarySaving">
+            {{ librarySaving ? "Saving..." : "Save Library Settings" }}
+          </button>
+        </div>
+
+        <p v-if="libraryLoading" class="muted">Loading repositories...</p>
+
+        <div class="repo-list">
+          <div v-for="(repo, index) in libraryRepos" :key="repo.id" class="repo-card">
+            <div class="row">
+              <label class="field grow">
+                <span>Name</span>
+                <input v-model="repo.name" type="text" />
+              </label>
+              <label class="field">
+                <span>Kind</span>
+                <select v-model="repo.kind">
+                  <option value="managed">Managed</option>
+                  <option value="folder">Folder</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Read-only</span>
+                <input type="checkbox" v-model="repo.readOnly" />
+              </label>
+            </div>
+            <div class="row">
+              <label class="field grow">
+                <span>Path</span>
+                <input class="path" type="text" v-model="repo.dir" readonly />
+              </label>
+              <button class="ghost" @click="openRepoPicker(index)">Choose...</button>
+              <button class="ghost" @click="removeRepository(repo.id)" :disabled="repo.id === 'cardgen'">Remove</button>
+            </div>
+            <p class="muted">Id: {{ repo.id }}</p>
+          </div>
+        </div>
+
+        <div class="repo-card repo-add">
+          <h3>Add repository</h3>
+          <div class="row">
+            <label class="field grow">
+              <span>Name</span>
+              <input v-model="newRepoName" type="text" placeholder="SillyTavern" />
+            </label>
+            <label class="field">
+              <span>Kind</span>
+              <select v-model="newRepoKind">
+                <option value="managed">Managed</option>
+                <option value="folder">Folder</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Read-only</span>
+              <input type="checkbox" v-model="newRepoReadOnly" />
+            </label>
+          </div>
+          <div class="row">
+            <label class="field grow">
+              <span>Path</span>
+              <input class="path" type="text" v-model="newRepoDir" readonly />
+            </label>
+            <button class="ghost" @click="openNewRepoPicker">Choose...</button>
+            <button @click="addRepository">Add</button>
+          </div>
+        </div>
+
+        <p v-if="libraryError" class="error">{{ libraryError }}</p>
       </CollapsiblePanel>
     </div>
     <FolderPickerModal
-      v-model="pickerOpen"
-      :initial-path="libraryDir"
-      @select="onSelectDir"
+      v-model="libraryPickerOpen"
+      :initial-path="pickerInitialPath"
+      @select="onPickRepoDir"
     />
   </section>
 </template>
@@ -422,6 +757,29 @@ async function onSaveContentRating() {
   grid-template-columns: 1fr auto;
   gap: 12px;
   align-items: center;
+}
+.repo-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+.repo-card {
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: var(--panel-2);
+}
+.repo-add h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.override-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 .path {
   padding: 10px;

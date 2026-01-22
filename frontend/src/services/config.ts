@@ -13,14 +13,33 @@ export type ImageProviderInfo = {
   error?: string;
 };
 
+export type FieldDetailProfile = "short" | "detailed" | "verbose";
+
+export type FieldOverrideMode = "inherit" | FieldDetailProfile;
+
+export type FieldKey =
+  | "description"
+  | "personality"
+  | "scenario"
+  | "first_mes"
+  | "mes_example"
+  | "creator_notes"
+  | "tags";
+
 export type AppConfig = {
   text: {
     provider: "koboldcpp" | "openai_compat" | "google_gemini";
-    koboldcpp: { baseUrl: string; model?: string; defaultParams?: { temperature?: number; top_p?: number; max_tokens?: number } };
+    koboldcpp: {
+      baseUrl: string;
+      model?: string;
+      requestTimeoutMs?: number;
+      defaultParams?: { temperature?: number; top_p?: number; max_tokens?: number };
+    };
     openaiCompat: {
       baseUrl: string;
       apiKeyRef?: string;
       model?: string;
+      requestTimeoutMs?: number;
       defaultParams?: { temperature?: number; top_p?: number; max_tokens?: number };
     };
     googleGemini: {
@@ -28,6 +47,7 @@ export type AppConfig = {
       apiBaseUrl: string;
       apiKeyRef?: string;
       model?: string;
+      requestTimeoutMs?: number;
       defaultParams?: { temperature?: number; top_p?: number; max_tokens?: number };
     };
   };
@@ -71,8 +91,18 @@ export type AppConfig = {
       loraStrengthClip: number;
     };
   };
-  library: { dir: string };
-  generation: { contentRating: "sfw" | "nsfw_allowed" };
+  library: {
+    dir: string;
+    activeRepoId: string;
+    repositories: Array<{ id: string; name: string; dir: string; kind: "managed" | "folder"; readOnly: boolean }>;
+  };
+  generation: {
+    contentRating: "sfw" | "nsfw_allowed";
+    fieldDetail?: {
+      profile: FieldDetailProfile;
+      overrides: Partial<Record<FieldKey, FieldOverrideMode>>;
+    };
+  };
 };
 
 export const getConfig = () => httpJson<AppConfig>("/api/config");

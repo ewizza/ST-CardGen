@@ -36,6 +36,7 @@ const initialState: CharacterState = {
 export const useCharacterStore = defineStore("character", () => {
   const state = useLocalStorage<CharacterState>("ccg_character_v1", { ...initialState });
   const libraryId = ref<string | null>(null);
+  const libraryRepoId = ref<string | null>(null);
 
   function field<K extends keyof CharacterState>(key: K) {
     return computed({
@@ -103,9 +104,15 @@ export const useCharacterStore = defineStore("character", () => {
   function reset() {
     state.value = { ...initialState };
     libraryId.value = null;
+    libraryRepoId.value = null;
   }
 
   function setLibraryId(id: string | null) {
+    libraryId.value = id;
+  }
+
+  function setLibraryContext(repoId: string | null, id: string | null) {
+    libraryRepoId.value = repoId;
     libraryId.value = id;
   }
 
@@ -123,7 +130,9 @@ export const useCharacterStore = defineStore("character", () => {
     avatarUrl,
     lastSeed,
     libraryId,
+    libraryRepoId,
     setLibraryId,
+    setLibraryContext,
     applyGenerated,
     applyCardData,
     reset,

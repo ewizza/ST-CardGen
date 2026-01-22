@@ -1,3 +1,5 @@
+import { buildFieldDetailLines, type FieldDetailSettings, type FieldKey } from "./fieldDetail.js";
+
 export type CharacterGenInput = {
   idea: string;
   name?: string;
@@ -5,7 +7,10 @@ export type CharacterGenInput = {
   lorebook?: string;
 };
 
-export function buildCharacterGenPrompt(input: CharacterGenInput & { contentRating: "sfw" | "nsfw_allowed" }) {
+export function buildCharacterGenPrompt(
+  input: CharacterGenInput,
+  options: { contentRating: "sfw" | "nsfw_allowed"; fieldDetail?: FieldDetailSettings }
+) {
   const nameLine = input.name?.trim()
     ? `Preferred name: ${input.name.trim()}`
     : "Preferred name: (invent a fitting name)";
@@ -23,11 +28,11 @@ export function buildCharacterGenPrompt(input: CharacterGenInput & { contentRati
     "- tags must be an array of short strings.",
     "- image_prompt must be a concise, detailed portrait prompt for the avatar.",
     "- negative_prompt should list what to avoid.",
-    "- mes_example must contain 1-2 example exchanges using {{user}} and {{char}} labels.",
-    input.contentRating === "sfw"
+    "- mes_example must use {{user}} and {{char}} labels.",
+    options.contentRating === "sfw"
       ? "Content rating: SFW only. Keep content safe and avoid sexual content."
       : "Content rating: NSFW allowed. Do not add safety constraints unless requested; focus negative_prompt on quality/artifacts.",
-    input.contentRating === "sfw"
+    options.contentRating === "sfw"
       ? "- negative_prompt must include nudity and explicit sexual content to avoid."
       : "- negative_prompt should focus on quality/artifacts unless the user requests otherwise.",
     "POV rules for first_mes:",
@@ -35,10 +40,20 @@ export function buildCharacterGenPrompt(input: CharacterGenInput & { contentRati
     "- second: address {{user}} in second person without controlling their actions.",
     "- third: write in third person, acknowledge {{user}} presence without controlling them.",
     "",
+    "FIELD LENGTH & STRUCTURE PRESET (MANDATORY):",
+    ...buildFieldDetailLines(options.fieldDetail, [
+      "description",
+      "personality",
+      "scenario",
+      "first_mes",
+      "mes_example",
+      "creator_notes",
+      "tags",
+    ] as FieldKey[]),
+    "",
     "FIRST MESSAGE (first_mes) QUALITY BAR (MANDATORY):",
     "- first_mes MUST read like the opening of a story scene, not a greeting.",
-    "- Length: aim 180–350 words (minimum 900 characters).",
-    "- Structure: 3–6 paragraphs separated by blank lines (encode as \\n\\n in JSON).",
+    "- Length & structure: follow the Field Length preset above for first_mes.",
     "- Start in medias res with concrete sensory detail and immediate context (place/time/weather/sounds).",
     "- Show {{char}} doing something *right now* (actions, body language, small beats) before/around dialogue.",
     "- Include at least ONE spoken line from {{char}} (quoted dialogue).",
@@ -78,12 +93,16 @@ type FillMissingInput = {
   lorebook?: string;
 };
 
-export function buildFillMissingPrompt(input: FillMissingInput) {
+export function buildFillMissingPrompt(input: FillMissingInput, options?: { fieldDetail?: FieldDetailSettings }) {
   const fields = JSON.stringify(input.card, null, 2);
   const loreLine = input.lorebook?.trim()
     ? `Lorebook:\n${input.lorebook.trim()}`
     : "Lorebook: (none)";
   const ideaLine = input.idea?.trim() ? `Idea: ${input.idea.trim()}` : "Idea: (none)";
+  const missingFieldKeys = input.missingKeys.filter((k) =>
+    ["description", "personality", "scenario", "first_mes", "mes_example", "creator_notes", "tags"].includes(k)
+  ) as FieldKey[];
+  const needsFirstMes = missingFieldKeys.includes("first_mes");
 
   return [
     "You are completing missing fields for a SillyTavern character card.",
@@ -92,17 +111,30 @@ export function buildFillMissingPrompt(input: FillMissingInput) {
     "- Output must be a JSON object containing ONLY the missing keys listed below.",
     "- Do NOT include keys that already have content.",
     "- Use standard JSON escaping for newlines (\\n). No trailing commas.",
-    "- mes_example must contain 1-2 example exchanges using {{user}} and {{char}} labels if requested.",
+    "- mes_example must use {{user}} and {{char}} labels if requested.",
     "POV rules for first_mes:",
     "- first: {{char}} speaks in first person.",
     "- second: address {{user}} in second person without controlling their actions.",
     "- third: write in third person, acknowledge {{user}} presence without controlling them.",
     "",
-    "If first_mes is among the missing keys, apply these FIRST MESSAGE requirements:",
-    "- 3–6 paragraphs (\\n\\n), 180–350 words (min 900 chars), scene-first (no greeting-only).",
-    "- Sensory setting + {{char}} actions + at least one dialogue line + end with a hook.",
-    "- Acknowledge {{user}} without controlling their thoughts/choices.",
+    "FIELD LENGTH & STRUCTURE PRESET (MANDATORY):",
+    ...buildFieldDetailLines(options?.fieldDetail, missingFieldKeys),
     "",
+    ...(needsFirstMes
+      ? [
+          "If first_mes is among the missing keys, apply these FIRST MESSAGE requirements:",
+          "- first_mes MUST read like the opening of a story scene, not a greeting.",
+          "- Length & structure: follow the Field Length preset above for first_mes.",
+          "- Start in medias res with concrete sensory detail and immediate context (place/time/weather/sounds).",
+          "- Show {{char}} doing something *right now* (actions, body language, small beats) before/around dialogue.",
+          "- Include at least ONE spoken line from {{char}} (quoted dialogue).",
+          "- Acknowledge {{user}} without controlling their thoughts/choices.",
+          "- End with a HOOK that demands a response (a question, an urgent request, a reveal, or an interrupting event).",
+          "- Avoid generic openers like: 'Greetings', 'Hello', 'How may I help', 'Welcome'.",
+          "- Do not include meta commentary (no 'as an AI', no writing notes).",
+          "",
+        ]
+      : []),
     "Missing keys:",
     input.missingKeys.join(", "),
     "",
@@ -152,7 +184,7 @@ type RegenerateInput = {
   regenNonce?: string;
 };
 
-export function buildRegeneratePrompt(input: RegenerateInput) {
+export function buildRegeneratePrompt(input: RegenerateInput, options?: { fieldDetail?: FieldDetailSettings }) {
   const nameLine = input.requestedName?.trim()
     ? `Preferred name: ${input.requestedName.trim()}`
     : "Preferred name: (unchanged)";
@@ -162,6 +194,10 @@ export function buildRegeneratePrompt(input: RegenerateInput) {
   const loreLine = input.lorebook?.trim()
     ? `Lorebook:\n${input.lorebook.trim()}`
     : "Lorebook: (none)";
+  const targetFieldKeys = input.targets.filter((k) =>
+    ["description", "personality", "scenario", "first_mes", "mes_example", "creator_notes", "tags"].includes(k)
+  ) as FieldKey[];
+  const needsFirstMes = targetFieldKeys.includes("first_mes");
 
   return [
     "You are regenerating selected fields for a SillyTavern character card.",
@@ -170,7 +206,7 @@ export function buildRegeneratePrompt(input: RegenerateInput) {
     "- Output must be a JSON object containing ONLY the target keys listed below.",
     "- Do NOT include keys that are not in the target list.",
     "- Use standard JSON escaping for newlines (\\n). No trailing commas.",
-    "- mes_example must contain 1-2 example exchanges using {{user}} and {{char}} labels if requested.",
+    "- mes_example must use {{user}} and {{char}} labels if requested.",
     nameRule,
     "Regeneration rules (MANDATORY):",
     "- You are regenerating the target keys ONLY.",
@@ -185,11 +221,24 @@ export function buildRegeneratePrompt(input: RegenerateInput) {
     "- second: address {{user}} in second person without controlling their actions.",
     "- third: write in third person, acknowledge {{user}} presence without controlling them.",
     "",
-    "If first_mes is among the target keys, apply these FIRST MESSAGE requirements:",
-    "- 3–6 paragraphs (\\n\\n), 180–350 words (min 900 chars), scene-first (no greeting-only).",
-    "- Sensory setting + {{char}} actions + at least one dialogue line + end with a hook.",
-    "- Acknowledge {{user}} without controlling their thoughts/choices.",
+    "FIELD LENGTH & STRUCTURE PRESET (MANDATORY):",
+    ...buildFieldDetailLines(options?.fieldDetail, targetFieldKeys),
     "",
+    ...(needsFirstMes
+      ? [
+          "If first_mes is among the target keys, apply these FIRST MESSAGE requirements:",
+          "- first_mes MUST read like the opening of a story scene, not a greeting.",
+          "- Length & structure: follow the Field Length preset above for first_mes.",
+          "- Start in medias res with concrete sensory detail and immediate context (place/time/weather/sounds).",
+          "- Show {{char}} doing something *right now* (actions, body language, small beats) before/around dialogue.",
+          "- Include at least ONE spoken line from {{char}} (quoted dialogue).",
+          "- Acknowledge {{user}} without controlling their thoughts/choices.",
+          "- End with a HOOK that demands a response (a question, an urgent request, a reveal, or an interrupting event).",
+          "- Avoid generic openers like: 'Greetings', 'Hello', 'How may I help', 'Welcome'.",
+          "- Do not include meta commentary (no 'as an AI', no writing notes).",
+          "",
+        ]
+      : []),
     "Target keys:",
     input.targets.join(", "),
     "",

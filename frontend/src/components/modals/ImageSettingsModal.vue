@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { comfyModels, comfyLoras } from "@/services/comfyui";
 import { connectImageProvider, listComfyWorkflows } from "@/services/image";
 import { useConfigStore } from "@/stores/configStore";
@@ -41,14 +41,14 @@ const baseUrl = computed({
     if (!cfg.config) return;
     if (cfg.config.image.provider === "stability") {
       ensureStabilitySettings();
-      cfg.config.image.stability.baseUrl = value;
+      cfg.config.image.stability!.baseUrl = value;
       ensureBaseUrls();
       cfg.config.image.baseUrls.stability = value;
       return;
     }
     if (cfg.config.image.provider === "google") {
       ensureGoogleSettings();
-      cfg.config.image.google.baseUrl = value;
+      cfg.config.image.google!.baseUrl = value;
       ensureBaseUrls();
       cfg.config.image.baseUrls.google = value;
       return;
@@ -68,6 +68,19 @@ const loadingSS = ref(false);
 const ssError = ref<string | null>(null);
 const ssWarning = ref<string | null>(null);
 const workflowError = ref<string | null>(null);
+
+function ensureImageDefaults() {
+  if (!cfg.config) return;
+  cfg.config.image ??= {} as any;
+
+  cfg.config.image.comfyui ??= {} as any;
+  cfg.config.image.stability ??= {} as any;
+  cfg.config.image.huggingface ??= {} as any;
+  cfg.config.image.google ??= {} as any;
+
+  cfg.config.image.google!.imagen ??= {} as any;
+  cfg.config.image.google!.nano ??= {} as any;
+}
 
 async function save() {
   await cfg.save();
@@ -96,8 +109,12 @@ async function loadWorkflows() {
     const res = await listComfyWorkflows();
     if (!res.ok) throw new Error(res.error || "Failed to load workflows");
     workflows.value = res.workflows ?? [];
-    if (!cfg.config.image.comfyui.workflow && workflows.value.length) {
-      cfg.config.image.comfyui.workflow = workflows.value[0].name;
+    if (!cfg.config.image.comfyui.workflow) {
+      ensureImageDefaults();
+      const first = workflows.value?.[0];
+      if (first?.name) {
+        cfg.config.image.comfyui!.workflow = first.name;
+      }
     }
   } catch (e: any) {
     workflowError.value = String(e?.message ?? e);
@@ -127,6 +144,7 @@ function ensureBaseUrls() {
 
 function ensureStabilitySettings() {
   if (!cfg.config) return;
+  ensureImageDefaults();
   const fallbackBaseUrl = cfg.config.image.baseUrls?.stability || "https://api.stability.ai";
   cfg.config.image.stability = cfg.config.image.stability ?? {
     baseUrl: fallbackBaseUrl,
@@ -140,13 +158,15 @@ const stabilityKeyRef = computed({
   get: () => cfg.config?.image.stability?.apiKeyRef ?? null,
   set: (value: string | null) => {
     if (!cfg.config) return;
+    ensureImageDefaults();
     ensureStabilitySettings();
-    cfg.config.image.stability.apiKeyRef = value || undefined;
+    cfg.config.image.stability!.apiKeyRef = value || undefined;
   },
 });
 
 function ensureHuggingFaceSettings() {
   if (!cfg.config) return;
+  ensureImageDefaults();
   cfg.config.image.huggingface = cfg.config.image.huggingface ?? {
     apiKeyRef: undefined,
     model: "black-forest-labs/FLUX.1-schnell",
@@ -156,6 +176,7 @@ function ensureHuggingFaceSettings() {
 
 function ensureGoogleSettings() {
   if (!cfg.config) return;
+  ensureImageDefaults();
   cfg.config.image.google = cfg.config.image.google ?? {
     baseUrl: cfg.config.image.baseUrls?.google || "https://generativelanguage.googleapis.com",
     apiKeyRef: undefined,
@@ -179,8 +200,9 @@ const huggingfaceKeyRef = computed({
   get: () => cfg.config?.image.huggingface?.apiKeyRef ?? null,
   set: (value: string | null) => {
     if (!cfg.config) return;
+    ensureImageDefaults();
     ensureHuggingFaceSettings();
-    cfg.config.image.huggingface.apiKeyRef = value || undefined;
+    cfg.config.image.huggingface!.apiKeyRef = value || undefined;
   },
 });
 
@@ -188,8 +210,9 @@ const googleKeyRef = computed({
   get: () => cfg.config?.image.google?.apiKeyRef ?? null,
   set: (value: string | null) => {
     if (!cfg.config) return;
+    ensureImageDefaults();
     ensureGoogleSettings();
-    cfg.config.image.google.apiKeyRef = value || undefined;
+    cfg.config.image.google!.apiKeyRef = value || undefined;
   },
 });
 
@@ -205,6 +228,7 @@ async function connectProvider(provider: "comfyui" | "sdapi" | "koboldcpp" | "st
       ok: Boolean(res.ok),
       checkedAt,
       baseUrl: res.baseUrl,
+      details: res.details,
       samplers: res.samplers ?? [],
       schedulers: res.schedulers ?? [],
       warning: res.warning,
@@ -218,8 +242,12 @@ async function connectProvider(provider: "comfyui" | "sdapi" | "koboldcpp" | "st
     if (!res.ok) ssError.value = res.error || "Failed to connect";
     if (provider === "comfyui" && res.details?.workflows) {
       workflows.value = res.details.workflows;
-      if (!cfg.config.image.comfyui.workflow && workflows.value.length) {
-        cfg.config.image.comfyui.workflow = workflows.value[0].name;
+      if (!cfg.config.image.comfyui.workflow) {
+        ensureImageDefaults();
+        const first = workflows.value?.[0];
+        if (first?.name) {
+          cfg.config.image.comfyui!.workflow = first.name;
+        }
       }
     }
     await cfg.save();
@@ -285,6 +313,10 @@ watch(
     if (!hasLora.value) loraOptions.value = [];
   }
 );
+
+onMounted(() => {
+  ensureImageDefaults();
+});
 </script>
 
 <template>
@@ -300,6 +332,7 @@ watch(
       <select v-model="cfg.config.image.provider">
         <option value="">-none-</option>
         <option value="comfyui">ComfyUI</option>
+        <option value="sdapi">SDAPI (A1111 / SD WebUI)</option>
         <option value="koboldcpp">KoboldCPP</option>
         <option value="stability">Stability</option>
         <option value="huggingface">Hugging Face</option>
@@ -311,6 +344,12 @@ watch(
       <span>Base URL</span>
       <input v-model="baseUrl" placeholder="http://127.0.0.1:8188" />
     </label>
+    <div class="row">
+      <button class="ghost" @click="connectProvider(cfg.config.image.provider)" :disabled="loadingSS">
+        {{ loadingSS ? "Checking..." : "Ping provider" }}
+      </button>
+      <span class="muted">Checks connectivity + updates status.</span>
+    </div>
 
     <div v-if="providerInfo" class="row">
       <span :class="providerInfo.ok ? 'muted' : 'bad'">
@@ -318,13 +357,17 @@ watch(
       </span>
       <span class="muted">Last checked: {{ providerInfo.checkedAt }}</span>
       <span v-if="providerInfo.error" class="bad">{{ providerInfo.error }}</span>
+      <details v-if="providerInfo.details && providerInfo.error" class="details">
+        <summary>Details</summary>
+        <pre class="pre">{{ JSON.stringify(providerInfo.details, null, 2) }}</pre>
+      </details>
       <span v-else class="muted">
         samplers: {{ providerInfo.samplers?.length ?? 0 }},
         schedulers: {{ providerInfo.schedulers?.length ?? 0 }}
       </span>
     </div>
 
-    <div v-if="isHuggingFace" class="card2 providerBlock">
+    <div v-if="isHuggingFace && cfg.config?.image?.huggingface" class="card2 providerBlock">
       <h3>Hugging Face</h3>
 
       <ApiKeySelector
@@ -350,7 +393,7 @@ watch(
       </label>
     </div>
 
-    <div v-if="isGoogle" class="card2 providerBlock">
+    <div v-if="isGoogle && cfg.config?.image?.google" class="card2 providerBlock">
       <h3>Google</h3>
 
       <ApiKeySelector
@@ -508,7 +551,7 @@ watch(
       </div>
     </div>
 
-    <div v-if="isStability" class="card2">
+    <div v-if="isStability && cfg.config?.image?.stability" class="card2">
       <h3>Stability</h3>
 
       <ApiKeySelector
@@ -607,4 +650,6 @@ input, select { padding: 8px; border-radius: 8px; border: 1px solid var(--border
 button { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border-2); background: var(--accent); color: var(--text); cursor: pointer; }
 .muted { color: var(--muted); }
 .bad { color: #c94a4a; font-weight: 600; }
+.pre { white-space: pre-wrap; font-size: 12px; }
+.details { margin-top: 6px; }
 </style>

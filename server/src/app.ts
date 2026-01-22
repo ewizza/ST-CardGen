@@ -16,6 +16,7 @@ import { libraryConfigRouter } from "./routes/libraryConfig.js";
 import { libraryRouter } from "./routes/library.js";
 import { textRouter } from "./routes/text.js";
 import { keysRouter } from "./routes/keys.js";
+import { jobsRouter } from "./routes/jobs.js";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -42,6 +43,7 @@ export function createApp() {
   app.use("/api/library", libraryConfigRouter);
   app.use("/api/library", libraryRouter);
   app.use("/api/image", imageRouter);
+  app.use("/api/image", jobsRouter);
   app.use("/api/text", textRouter);
   app.use("/api/keys", keysRouter);
 
