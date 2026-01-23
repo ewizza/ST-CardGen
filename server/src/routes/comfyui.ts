@@ -2,67 +2,86 @@ import { Router } from "express";
 import { getComfyBaseUrl, getSystemStats, getObjectInfo } from "../adapters/comfyui/client.js";
 import { extractCheckpointModels, extractLoras } from "../adapters/comfyui/parse.js";
 import { httpGetBuffer, isHttpRequestError } from "../utils/http.js";
+import { fail, ok, wrap } from "../lib/api.js";
+import { mapHttpRequestError, mapUnknownError } from "../lib/errorMap.js";
 
 
 export const comfyuiRouter = Router();
 
 // GET /api/comfyui/ping
-comfyuiRouter.get("/ping", async (req, res) => {
+comfyuiRouter.get("/ping", wrap(async (req, res) => {
   const baseUrl = getComfyBaseUrl();
   try {
     const stats = await getSystemStats(baseUrl);
-    res.json({ ok: true, baseUrl, stats });
+    return ok(res, { baseUrl, stats });
   } catch (e1: any) {
     try {
       const info = await getObjectInfo(baseUrl);
-      res.json({ ok: true, baseUrl, objectInfo: true, keys: Object.keys(info ?? {}) });
+      return ok(res, { baseUrl, objectInfo: true, keys: Object.keys(info ?? {}) });
     } catch (e2: any) {
-      res.status(200).json({
-        ok: false,
-        baseUrl,
-        error: String(e2?.message ?? e2 ?? e1?.message ?? e1),
-      });
+      const err = isHttpRequestError(e2) ? e2 : (isHttpRequestError(e1) ? e1 : null);
+      if (err) {
+        const mapped = mapHttpRequestError(err);
+        return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
+      }
+      const mapped = mapUnknownError(e2 ?? e1);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
     }
   }
-});
+}));
 
 // GET /api/comfyui/object-info
-comfyuiRouter.get("/object-info", async (req, res) => {
+comfyuiRouter.get("/object-info", wrap(async (req, res) => {
   const baseUrl = getComfyBaseUrl();
   try {
     const info = await getObjectInfo(baseUrl);
-    res.json({ ok: true, baseUrl, info });
+    return ok(res, { baseUrl, info });
   } catch (e: any) {
-    res.status(200).json({ ok: false, baseUrl, error: String(e?.message ?? e) });
+    if (isHttpRequestError(e)) {
+      const mapped = mapHttpRequestError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
+    }
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+}));
 
 // GET /api/comfyui/models
-comfyuiRouter.get("/models", async (req, res) => {
+comfyuiRouter.get("/models", wrap(async (req, res) => {
   const baseUrl = getComfyBaseUrl();
   try {
     const info = await getObjectInfo(baseUrl);
     const models = extractCheckpointModels(info);
-    res.json({ ok: true, baseUrl, models });
+    return ok(res, { baseUrl, models });
   } catch (e: any) {
-    res.status(200).json({ ok: false, baseUrl, error: String(e?.message ?? e), models: [] });
+    if (isHttpRequestError(e)) {
+      const mapped = mapHttpRequestError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
+    }
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+}));
 
 // GET /api/comfyui/loras
-comfyuiRouter.get("/loras", async (req, res) => {
+comfyuiRouter.get("/loras", wrap(async (req, res) => {
   const baseUrl = getComfyBaseUrl();
   try {
     const info = await getObjectInfo(baseUrl);
     const loras = extractLoras(info);
-    res.json({ ok: true, baseUrl, loras });
+    return ok(res, { baseUrl, loras });
   } catch (e: any) {
-    res.status(200).json({ ok: false, baseUrl, error: String(e?.message ?? e), loras: [] });
+    if (isHttpRequestError(e)) {
+      const mapped = mapHttpRequestError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
+    }
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+}));
 
 // GET /api/comfyui/view
-comfyuiRouter.get("/view", async (req, res) => {
+comfyuiRouter.get("/view", wrap(async (req, res) => {
   const baseUrl = getComfyBaseUrl();
   try {
     const params = new URLSearchParams();
@@ -82,8 +101,10 @@ comfyuiRouter.get("/view", async (req, res) => {
     return res.send(buffer);
   } catch (e: any) {
     if (isHttpRequestError(e)) {
-      return res.status(200).json({ ok: false, baseUrl, error: e.message, details: e.details });
+      const mapped = mapHttpRequestError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
     }
-    return res.status(200).json({ ok: false, baseUrl, error: String(e?.message ?? e) });
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+}));

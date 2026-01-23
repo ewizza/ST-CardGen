@@ -9,7 +9,8 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "types": [
-      "node"
+      "node",
+      "express"
     ]
   },
   "include": [

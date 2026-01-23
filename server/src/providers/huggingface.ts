@@ -55,7 +55,7 @@ export async function huggingfaceTextToImage(args: HuggingFaceTextToImageArgs): 
   try {
     const client = new InferenceClient(args.accessToken);
     const output = await client.textToImage({
-      provider: args.provider ?? "hf-inference",
+      provider: (args.provider ?? "hf-inference") as any,
       model: args.model,
       inputs: args.prompt,
       parameters: {

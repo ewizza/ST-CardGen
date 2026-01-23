@@ -13,6 +13,8 @@ import { huggingfaceTextToImage } from "../providers/huggingface.js";
 import { generateGoogleImage } from "../providers/google.js";
 import { getKey } from "../services/keyStore.js";
 import { httpGetJson, httpPostJson, isHttpRequestError } from "../utils/http.js";
+import { fail, ok, wrap } from "../lib/api.js";
+import { mapHttpRequestError, mapUnknownError } from "../lib/errorMap.js";
 
 export const imageRouter = Router();
 
@@ -103,10 +105,10 @@ function applyLoraSettings(workflow: Record<string, any>, cfg: any) {
 }
 
 // GET /api/image/result/:id
-imageRouter.get("/result/:id", (req, res) => {
+imageRouter.get("/result/:id", (req: any, res: any) => {
   const id = String(req.params.id || "");
   const r = results.get(id);
-  if (!r) return res.status(404).end();
+  if (!r) return fail(res, 404, "NOT_FOUND", "Image result not found");
 
   res.setHeader("Content-Type", r.mime);
   res.setHeader("Cache-Control", "no-store");
@@ -114,20 +116,23 @@ imageRouter.get("/result/:id", (req, res) => {
 });
 
 // GET /api/image/comfyui/workflows
-imageRouter.get("/comfyui/workflows", async (req, res) => {
+imageRouter.get("/comfyui/workflows", wrap(async (req, res) => {
   try {
     const workflows = await listWorkflows();
-    return res.json({ ok: true, workflows });
+    return ok(res, { workflows });
   } catch (e: any) {
+    if (e instanceof z.ZodError) throw e;
     if (isHttpRequestError(e)) {
-      return res.status(200).json({ ok: false, error: e.message, details: e.details });
+      const mapped = mapHttpRequestError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
     }
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+}));
 
 // GET /api/image/samplers
-imageRouter.get("/samplers", async (req, res) => {
+imageRouter.get("/samplers", wrap(async (req, res) => {
   let provider: string | undefined;
   let baseUrl: string | undefined;
   try {
@@ -135,34 +140,38 @@ imageRouter.get("/samplers", async (req, res) => {
     provider = cfg.image.provider;
 
     if (cfg.image.provider === "google") {
-      return res.json({ ok: true, provider, baseUrl, samplers: [] });
+      return ok(res, { provider, baseUrl, samplers: [] });
     }
 
     if (cfg.image.provider === "comfyui") {
       baseUrl = getComfyBaseUrl();
       const info = await getObjectInfo(baseUrl);
       const samplers = extractSamplers(info);
-      return res.json({ ok: true, provider, baseUrl, samplers });
+      return ok(res, { provider, baseUrl, samplers });
     }
 
     if (cfg.image.provider === "sdapi" || cfg.image.provider === "koboldcpp") {
       baseUrl = normalizeBaseUrl(cfg.image.baseUrls?.[cfg.image.provider] || "");
       const data = await httpGetJson(`${baseUrl}/sdapi/v1/samplers`, { timeoutMs: TIMEOUT_LIST_MS });
       const samplers = parseStringList(data);
-      return res.json({ ok: true, provider, baseUrl, samplers });
+      return ok(res, { provider, baseUrl, samplers });
     }
 
-    return res.json({ ok: true, provider, samplers: [] });
+    return ok(res, { provider, samplers: [] });
   } catch (e: any) {
     if (isHttpRequestError(e)) {
-      return res.status(200).json({ ok: false, error: e.message, details: e.details, provider, baseUrl });
+      const mapped = mapHttpRequestError(e);
+      const details = mapped.details ? { ...mapped.details, provider, baseUrl } : { provider, baseUrl };
+      return fail(res, mapped.status, mapped.code, mapped.message, details);
     }
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e), provider, baseUrl });
+    const mapped = mapUnknownError(e);
+    const details = mapped.details ? { ...mapped.details, provider, baseUrl } : { provider, baseUrl };
+    return fail(res, mapped.status, mapped.code, mapped.message, details);
   }
-});
+}));
 
 // GET /api/image/schedulers
-imageRouter.get("/schedulers", async (req, res) => {
+imageRouter.get("/schedulers", wrap(async (req, res) => {
   let provider: string | undefined;
   let baseUrl: string | undefined;
   try {
@@ -170,14 +179,14 @@ imageRouter.get("/schedulers", async (req, res) => {
     provider = cfg.image.provider;
 
     if (cfg.image.provider === "google") {
-      return res.json({ ok: true, provider, baseUrl, schedulers: [] });
+      return ok(res, { provider, baseUrl, schedulers: [] });
     }
 
     if (cfg.image.provider === "comfyui") {
       baseUrl = getComfyBaseUrl();
       const info = await getObjectInfo(baseUrl);
       const schedulers = extractSchedulers(info);
-      return res.json({ ok: true, provider, baseUrl, schedulers });
+      return ok(res, { provider, baseUrl, schedulers });
     }
 
     if (cfg.image.provider === "sdapi" || cfg.image.provider === "koboldcpp") {
@@ -185,11 +194,10 @@ imageRouter.get("/schedulers", async (req, res) => {
       try {
         const data = await httpGetJson(`${baseUrl}/sdapi/v1/schedulers`, { timeoutMs: TIMEOUT_LIST_MS });
         const schedulers = parseStringList(data);
-        return res.json({ ok: true, provider, baseUrl, schedulers });
+        return ok(res, { provider, baseUrl, schedulers });
       } catch (e: any) {
         if (isHttpRequestError(e) && (e.details.status === 404 || e.details.status === 405)) {
-          return res.json({
-            ok: true,
+          return ok(res, {
             provider,
             baseUrl,
             schedulers: [],
@@ -200,181 +208,50 @@ imageRouter.get("/schedulers", async (req, res) => {
       }
     }
 
-    return res.json({ ok: true, provider, schedulers: [] });
+    return ok(res, { provider, schedulers: [] });
   } catch (e: any) {
     if (isHttpRequestError(e)) {
-      return res.status(200).json({ ok: false, error: e.message, details: e.details, provider, baseUrl });
+      const mapped = mapHttpRequestError(e);
+      const details = mapped.details ? { ...mapped.details, provider, baseUrl } : { provider, baseUrl };
+      return fail(res, mapped.status, mapped.code, mapped.message, details);
     }
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e), provider, baseUrl });
+    const mapped = mapUnknownError(e);
+    const details = mapped.details ? { ...mapped.details, provider, baseUrl } : { provider, baseUrl };
+    return fail(res, mapped.status, mapped.code, mapped.message, details);
   }
-});
+}));
 
 // POST /api/image/connect
-imageRouter.post("/connect", async (req, res) => {
-  let provider: "sdapi" | "comfyui" | "koboldcpp" | "stability" | "huggingface" | "google" | undefined;
+imageRouter.post("/connect", wrap(async (req, res) => {
+  const body = z.object({
+    provider: z.enum(["sdapi", "comfyui", "koboldcpp", "stability", "huggingface", "google"]),
+  }).parse(req.body);
+
+  const provider = body.provider;
+  const cfg = loadConfig();
+  const checkedAt = new Date().toISOString();
   let baseUrl: string | undefined;
-  try {
-    const body = z.object({
-      provider: z.enum(["sdapi", "comfyui", "koboldcpp", "stability", "huggingface", "google"]),
-    }).parse(req.body);
-    provider = body.provider;
+  let samplers: string[] = [];
+  let schedulers: string[] = [];
+  let warning: string | undefined;
+  let error: string | undefined;
+  let details: any;
+  let okFlag = false;
 
-    const cfg = loadConfig();
-    if (provider === "stability") {
-      baseUrl = normalizeBaseUrl(cfg.image.stability?.baseUrl || cfg.image.baseUrls?.stability || "");
-    } else if (provider === "huggingface") {
-      baseUrl = normalizeBaseUrl(cfg.image.baseUrls?.huggingface || "https://router.huggingface.co");
-    } else if (provider === "google") {
-      baseUrl = normalizeBaseUrl(cfg.image.google?.baseUrl || cfg.image.baseUrls?.google || "");
-    } else {
-      baseUrl = normalizeBaseUrl(cfg.image.baseUrls?.[provider] || "");
-    }
+  if (provider === "stability") {
+    baseUrl = normalizeBaseUrl(cfg.image.stability?.baseUrl || cfg.image.baseUrls?.stability || "");
+  } else if (provider === "huggingface") {
+    baseUrl = normalizeBaseUrl(cfg.image.baseUrls?.huggingface || "https://router.huggingface.co");
+  } else if (provider === "google") {
+    baseUrl = normalizeBaseUrl(cfg.image.google?.baseUrl || cfg.image.baseUrls?.google || "");
+  } else {
+    baseUrl = normalizeBaseUrl(cfg.image.baseUrls?.[provider] || "");
+  }
 
-    let samplers: string[] = [];
-    let schedulers: string[] = [];
-    let warning: string | undefined;
-    let error: string | undefined;
-    let details: any;
-    let ok = false;
-    const checkedAt = new Date().toISOString();
-
-    if (provider === "comfyui") {
-      const info = await getObjectInfo(baseUrl);
-      samplers = extractSamplers(info);
-      schedulers = extractSchedulers(info);
-      const workflows = await listWorkflows();
-      details = { hasObjectInfo: true, workflows };
-      ok = true;
-      cfg.image.providerInfo = cfg.image.providerInfo || {};
-      cfg.image.providerInfo[provider] = {
-        ok,
-        checkedAt,
-        baseUrl,
-        samplers,
-        schedulers,
-        warning,
-        error,
-        details,
-      };
-      saveConfig(cfg);
-      return res.json({
-        ok,
-        provider,
-        baseUrl,
-        samplers,
-        schedulers,
-        warning,
-        error,
-        checkedAt,
-        details,
-      });
-    } else if (provider === "stability") {
-      ok = true;
-      warning = "Connectivity check not implemented for Stability.";
-      cfg.image.providerInfo = cfg.image.providerInfo || {};
-      cfg.image.providerInfo[provider] = {
-        ok,
-        checkedAt,
-        baseUrl,
-        samplers,
-        schedulers,
-        warning,
-        error,
-        details,
-      };
-      saveConfig(cfg);
-      return res.json({ ok, provider, baseUrl, samplers, schedulers, warning, error, checkedAt });
-    } else if (provider === "huggingface") {
-      const apiKeyRef = cfg.image.huggingface?.apiKeyRef;
-      if (!apiKeyRef) {
-        ok = false;
-        error = "No Hugging Face API key selected.";
-      } else {
-        const apiKey = await getKey(apiKeyRef);
-        if (!apiKey) {
-          ok = false;
-          error = "Selected API key not found.";
-        } else {
-          try {
-            details = await httpGetJson("https://huggingface.co/api/whoami-v2", {
-              timeoutMs: 10000,
-              headers: { Authorization: `Bearer ${apiKey}` },
-            });
-            ok = true;
-          } catch (e: any) {
-            ok = false;
-            error = String(e?.message ?? e);
-            if (isHttpRequestError(e)) details = e.details;
-          }
-        }
-      }
-      cfg.image.providerInfo = cfg.image.providerInfo || {};
-      cfg.image.providerInfo[provider] = {
-        ok,
-        checkedAt,
-        baseUrl,
-        samplers,
-        schedulers,
-        warning,
-        error,
-        details,
-      };
-      saveConfig(cfg);
-      return res.json({ ok, provider, baseUrl, samplers, schedulers, warning, error, checkedAt, details });
-    } else if (provider === "google") {
-      const apiKeyRef = cfg.image.google?.apiKeyRef;
-      if (!apiKeyRef) {
-        ok = false;
-        error = "No API key selected.";
-      } else {
-        const apiKey = await getKey(apiKeyRef);
-        if (!apiKey) {
-          ok = false;
-          error = "Selected API key not found.";
-        } else {
-          ok = true;
-          warning = "Google provider does not expose samplers/schedulers.";
-        }
-      }
-      cfg.image.providerInfo = cfg.image.providerInfo || {};
-      cfg.image.providerInfo[provider] = {
-        ok,
-        checkedAt,
-        baseUrl,
-        samplers,
-        schedulers,
-        warning,
-        error,
-        details,
-      };
-      saveConfig(cfg);
-      return res.json({ ok, provider, baseUrl, samplers, schedulers, warning, error, checkedAt });
-    } else {
-      try {
-        const data = await httpGetJson(`${baseUrl}/sdapi/v1/samplers`, { timeoutMs: TIMEOUT_CONNECT_MS });
-        samplers = parseStringList(data);
-        ok = true;
-      } catch (e: any) {
-        ok = false;
-        error = String(e?.message ?? e);
-        if (isHttpRequestError(e)) details = e.details;
-      }
-
-      try {
-        const data = await httpGetJson(`${baseUrl}/sdapi/v1/schedulers`, { timeoutMs: TIMEOUT_CONNECT_MS });
-        schedulers = parseStringList(data);
-      } catch (e: any) {
-        if (isHttpRequestError(e) && (e.details.status === 404 || e.details.status === 405)) {
-          warning = "Endpoint not available";
-        } else {
-          error = error || String(e?.message ?? e);
-          if (isHttpRequestError(e)) details = details || e.details;
-        }
-      }
-    }
+  const persist = () => {
     cfg.image.providerInfo = cfg.image.providerInfo || {};
     cfg.image.providerInfo[provider] = {
-      ok,
+      ok: okFlag,
       checkedAt,
       baseUrl,
       samplers,
@@ -384,18 +261,120 @@ imageRouter.post("/connect", async (req, res) => {
       details,
     };
     saveConfig(cfg);
+  };
 
-    return res.json({ ok, provider, baseUrl, samplers, schedulers, warning, error, checkedAt, details });
+  const failWith = (status: number, code: string, message: string, extraDetails?: any) => {
+    error = message;
+    okFlag = false;
+    persist();
+    const payload = extraDetails ?? { provider, baseUrl, checkedAt, samplers, schedulers, warning, details };
+    return fail(res, status, code, message, payload);
+  };
+
+  if (provider === "comfyui") {
+    try {
+      const info = await getObjectInfo(baseUrl);
+      samplers = extractSamplers(info);
+      schedulers = extractSchedulers(info);
+      const workflows = await listWorkflows();
+      details = { hasObjectInfo: true, workflows };
+      okFlag = true;
+      persist();
+      return ok(res, { provider, baseUrl, samplers, schedulers, warning, error, checkedAt, details });
+    } catch (e: any) {
+      if (isHttpRequestError(e)) {
+        const mapped = mapHttpRequestError(e);
+        const mappedDetails = mapped.details ? { ...mapped.details, provider, baseUrl, checkedAt } : { provider, baseUrl, checkedAt };
+        return failWith(mapped.status, mapped.code, mapped.message, mappedDetails);
+      }
+      const mapped = mapUnknownError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
+    }
+  }
+
+  if (provider === "stability") {
+    okFlag = true;
+    warning = "Connectivity check not implemented for Stability.";
+    persist();
+    return ok(res, { provider, baseUrl, samplers, schedulers, warning, error, checkedAt });
+  }
+
+  if (provider === "huggingface") {
+    const apiKeyRef = cfg.image.huggingface?.apiKeyRef;
+    if (!apiKeyRef) {
+      return failWith(400, "VALIDATION_ERROR", "No Hugging Face API key selected.");
+    }
+    const apiKey = await getKey(apiKeyRef);
+    if (!apiKey) {
+      return failWith(404, "NOT_FOUND", "Selected API key not found.");
+    }
+    try {
+      details = await httpGetJson("https://huggingface.co/api/whoami-v2", {
+        timeoutMs: 10000,
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      okFlag = true;
+      persist();
+      return ok(res, { provider, baseUrl, samplers, schedulers, warning, error, checkedAt, details });
+    } catch (e: any) {
+      if (isHttpRequestError(e)) {
+        const mapped = mapHttpRequestError(e);
+        return failWith(mapped.status, mapped.code, mapped.message, mapped.details);
+      }
+      const mapped = mapUnknownError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
+    }
+  }
+
+  if (provider === "google") {
+    const apiKeyRef = cfg.image.google?.apiKeyRef;
+    if (!apiKeyRef) {
+      return failWith(400, "VALIDATION_ERROR", "No API key selected.");
+    }
+    const apiKey = await getKey(apiKeyRef);
+    if (!apiKey) {
+      return failWith(404, "NOT_FOUND", "Selected API key not found.");
+    }
+    okFlag = true;
+    warning = "Google provider does not expose samplers/schedulers.";
+    persist();
+    return ok(res, { provider, baseUrl, samplers, schedulers, warning, error, checkedAt });
+  }
+
+  try {
+    const data = await httpGetJson(`${baseUrl}/sdapi/v1/samplers`, { timeoutMs: TIMEOUT_CONNECT_MS });
+    samplers = parseStringList(data);
+    okFlag = true;
   } catch (e: any) {
     if (isHttpRequestError(e)) {
-      return res.status(200).json({ ok: false, error: e.message, details: e.details, provider, baseUrl });
+      const mapped = mapHttpRequestError(e);
+      return failWith(mapped.status, mapped.code, mapped.message, mapped.details);
     }
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e), provider, baseUrl });
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+
+  try {
+    const data = await httpGetJson(`${baseUrl}/sdapi/v1/schedulers`, { timeoutMs: TIMEOUT_CONNECT_MS });
+    schedulers = parseStringList(data);
+  } catch (e: any) {
+    if (isHttpRequestError(e) && (e.details.status === 404 || e.details.status === 405)) {
+      warning = "Endpoint not available";
+    } else if (isHttpRequestError(e)) {
+      const mapped = mapHttpRequestError(e);
+      return failWith(mapped.status, mapped.code, mapped.message, mapped.details);
+    } else {
+      const mapped = mapUnknownError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
+    }
+  }
+
+  persist();
+  return ok(res, { provider, baseUrl, samplers, schedulers, warning, error, checkedAt, details });
+}));
 
 // POST /api/image/generate
-imageRouter.post("/generate", async (req, res) => {
+imageRouter.post("/generate", wrap(async (req, res) => {
   try {
     const body = GenerateSchema.parse(req.body);
     const cfg = loadConfig();
@@ -404,15 +383,15 @@ imageRouter.post("/generate", async (req, res) => {
     if (provider === "google") {
       const cfgGoogle = cfg.image.google;
       if (!cfgGoogle) {
-        return res.status(200).json({ ok: false, provider, error: "Google configuration not found." });
+        return fail(res, 400, "VALIDATION_ERROR", "Google configuration not found.");
       }
       const apiKeyRef = cfgGoogle?.apiKeyRef;
       if (!apiKeyRef) {
-        return res.status(200).json({ ok: false, provider, error: "No API key selected." });
+        return fail(res, 400, "VALIDATION_ERROR", "No API key selected.");
       }
       const apiKey = await getKey(apiKeyRef);
       if (!apiKey) {
-        return res.status(200).json({ ok: false, provider, error: "Selected API key not found." });
+        return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
       }
       try {
         const { buffer, mime } = await generateGoogleImage({
@@ -422,31 +401,25 @@ imageRouter.post("/generate", async (req, res) => {
           apiKey,
         });
         const id = putResult(buffer, mime);
-        return res.json({
-          ok: true,
-          provider,
-          imageUrl: `/api/image/result/${encodeURIComponent(id)}`,
-        });
+        return ok(res, { provider, imageUrl: `/api/image/result/${encodeURIComponent(id)}` });
       } catch (e: any) {
         if (isHttpRequestError(e)) {
-          return res.status(200).json({ ok: false, provider, error: e.message, details: e.details });
+          const mapped = mapHttpRequestError(e);
+          return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
         }
-        return res.status(200).json({
-          ok: false,
-          provider,
-          error: String(e?.message ?? e),
-        });
+        const mapped = mapUnknownError(e);
+        return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
       }
     }
 
     if (provider === "huggingface") {
       const apiKeyRef = cfg.image.huggingface?.apiKeyRef;
       if (!apiKeyRef) {
-        return res.status(400).json({ ok: false, provider, error: "No Hugging Face API key selected." });
+        return fail(res, 400, "VALIDATION_ERROR", "No Hugging Face API key selected.");
       }
       const apiKey = await getKey(apiKeyRef);
       if (!apiKey) {
-        return res.status(400).json({ ok: false, provider, error: "Selected API key not found." });
+        return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
       }
       const model = cfg.image.huggingface?.model || "black-forest-labs/FLUX.1-schnell";
       const hfProvider = cfg.image.huggingface?.provider || "hf-inference";
@@ -462,32 +435,29 @@ imageRouter.post("/generate", async (req, res) => {
           steps: cfg.image.steps,
           cfgScale: cfg.image.cfgScale,
         });
-        return res.json({
-          ok: true,
+        return ok(res, {
           provider,
           imageUrl: `/output/${encodeURIComponent(result.fileName)}`,
           meta: { provider, model, hfProvider },
         });
       } catch (e: any) {
         if (isHttpRequestError(e)) {
-          return res.status(200).json({ ok: false, provider, error: e.message, details: e.details });
+          const mapped = mapHttpRequestError(e);
+          return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
         }
-        return res.status(200).json({
-          ok: false,
-          provider,
-          error: String(e?.message ?? e),
-        });
+        const mapped = mapUnknownError(e);
+        return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
       }
     }
 
     if (provider === "stability") {
       const apiKeyRef = cfg.image.stability?.apiKeyRef;
       if (!apiKeyRef) {
-        return res.status(200).json({ ok: false, provider, error: "No API key selected for Stability." });
+        return fail(res, 400, "VALIDATION_ERROR", "No API key selected for Stability.");
       }
       const apiKey = await getKey(apiKeyRef);
       if (!apiKey) {
-        return res.status(200).json({ ok: false, provider, error: "Selected API key not found." });
+        return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
       }
       try {
         const result = await stabilityGenerate({
@@ -499,21 +469,18 @@ imageRouter.post("/generate", async (req, res) => {
           apiKey,
           baseUrl: cfg.image.stability?.baseUrl || cfg.image.baseUrls?.stability,
         });
-        return res.json({
-          ok: true,
+        return ok(res, {
           provider,
           seed: body.seed,
           imageUrl: `/output/${encodeURIComponent(result.filename)}`,
         });
       } catch (e: any) {
         if (isHttpRequestError(e)) {
-          return res.status(200).json({ ok: false, provider, error: e.message, details: e.details });
+          const mapped = mapHttpRequestError(e);
+          return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
         }
-        return res.status(200).json({
-          ok: false,
-          provider,
-          error: String(e?.message ?? e),
-        });
+        const mapped = mapUnknownError(e);
+        return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
       }
     }
 
@@ -540,18 +507,21 @@ imageRouter.post("/generate", async (req, res) => {
         });
       } catch (e: any) {
         if (isHttpRequestError(e)) {
-          return res.status(200).json({ ok: false, provider, error: e.message, details: e.details, baseUrl });
+          const mapped = mapHttpRequestError(e);
+          const details = mapped.details ? { ...mapped.details, baseUrl } : { baseUrl };
+          return fail(res, mapped.status, mapped.code, mapped.message, details);
         }
-        return res.status(200).json({ ok: false, provider, error: String(e?.message ?? e), baseUrl });
+        const mapped = mapUnknownError(e);
+        const details = mapped.details ? { ...mapped.details, baseUrl } : { baseUrl };
+        return fail(res, mapped.status, mapped.code, mapped.message, details);
       }
       const firstImage = Array.isArray(out?.images) ? out.images[0] : null;
       if (!firstImage || typeof firstImage !== "string") {
-        return res.status(200).json({ ok: false, provider, error: "SDAPI did not return any images", out });
+        return fail(res, 502, "PROVIDER_BAD_RESPONSE", "SDAPI did not return any images", { out });
       }
       const buf = decodeBase64Image(firstImage);
       const id = putResult(buf, "image/png");
-      return res.json({
-        ok: true,
+      return ok(res, {
         provider,
         seed,
         imageUrl: `/api/image/result/${encodeURIComponent(id)}?_fmt=png`,
@@ -560,7 +530,7 @@ imageRouter.post("/generate", async (req, res) => {
     }
 
     if (provider !== "comfyui") {
-      return res.status(200).json({ ok: false, provider, error: `Provider '${provider}' not implemented yet.` });
+      return fail(res, 400, "VALIDATION_ERROR", `Provider '${provider}' not implemented yet.`);
     }
 
     const baseUrl = getComfyBaseUrl();
@@ -590,20 +560,24 @@ imageRouter.post("/generate", async (req, res) => {
       submit = await httpPostJson(`${baseUrl}/prompt`, { prompt: patched }, { timeoutMs: TIMEOUT_COMFY_PROMPT_MS });
     } catch (e: any) {
       if (isHttpRequestError(e)) {
-        return res.status(200).json({ ok: false, error: e.message, details: e.details });
+        const mapped = mapHttpRequestError(e);
+        return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
       }
-      return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+      const mapped = mapUnknownError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
     }
     const promptId = submit?.prompt_id;
-    if (!promptId) return res.status(200).json({ ok: false, error: "ComfyUI did not return prompt_id", submit });
+    if (!promptId) return fail(res, 502, "PROVIDER_BAD_RESPONSE", "ComfyUI did not return prompt_id", { submit });
 
     const job = createComfyJob(baseUrl, promptId);
     updateJob(job.id, { state: "running", message: "Submitted to ComfyUI", progress: 0.1 });
-    return res.json({ ok: true, provider: "comfyui", jobId: job.id, promptId });
+    return ok(res, { provider: "comfyui", jobId: job.id, promptId });
   } catch (e: any) {
     if (isHttpRequestError(e)) {
-      return res.status(200).json({ ok: false, error: e.message, details: e.details });
+      const mapped = mapHttpRequestError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
     }
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+}));

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { ConfigSchema, type AppConfig } from "../config/schema.js";
 import { loadConfig, saveConfig } from "../config/store.js";
+import { ok, wrap } from "../lib/api.js";
 
 export const configRouter = Router();
 
@@ -17,14 +18,14 @@ function redactConfig(cfg: AppConfig): AppConfig {
   return next;
 }
 
-configRouter.get("/", (req, res) => {
+configRouter.get("/", wrap((req, res) => {
   current = loadConfig();
-  res.json(redactConfig(current));
-});
+  return ok(res, redactConfig(current));
+}));
 
-configRouter.put("/", (req, res) => {
+configRouter.put("/", wrap((req, res) => {
   const parsed = ConfigSchema.parse(req.body);
   current = parsed;
   saveConfig(current);
-  res.json(redactConfig(current));
-});
+  return ok(res, redactConfig(current));
+}));

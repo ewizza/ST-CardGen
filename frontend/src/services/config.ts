@@ -105,6 +105,17 @@ export type AppConfig = {
   };
 };
 
-export const getConfig = () => httpJson<AppConfig>("/api/config");
-export const putConfig = (cfg: AppConfig) =>
-  httpJson<AppConfig>("/api/config", { method: "PUT", body: JSON.stringify(cfg) });
+function stripOk(value: any): AppConfig {
+  if (value && typeof value === "object" && "ok" in value) {
+    const { ok, ...rest } = value as any;
+    return rest as AppConfig;
+  }
+  return value as AppConfig;
+}
+
+export const getConfig = async () => stripOk(await httpJson<any>("/api/config"));
+export const putConfig = (cfg: AppConfig) => {
+  const payload: any = { ...cfg };
+  delete payload.ok;
+  return httpJson<AppConfig>("/api/config", { method: "PUT", body: JSON.stringify(payload) });
+};

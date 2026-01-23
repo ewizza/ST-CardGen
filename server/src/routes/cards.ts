@@ -4,6 +4,7 @@ import multer from "multer";
 
 import { buildV2CardFromStorePayload, filenameFromCard, normalizeImportedCard } from "../domain/cards/v2.js";
 import { embedCardIntoPng, extractCardFromPng } from "../domain/cards/png.js";
+import { fail, wrap } from "../lib/api.js";
 
 export const cardsRouter = Router();
 
@@ -42,76 +43,60 @@ async function fetchAvatarBuffer(req: any, avatarUrl: string): Promise<Buffer> {
 }
 
 // POST /api/cards/export/json
-cardsRouter.post("/export/json", (req, res) => {
-  try {
-    const body = ExportJsonSchema.parse(req.body);
-    const card = buildV2CardFromStorePayload(body.card);
-    const filename = `${filenameFromCard(card)}.json`;
-    const payload = JSON.stringify(card, null, 2);
+cardsRouter.post("/export/json", wrap((req, res) => {
+  const body = ExportJsonSchema.parse(req.body);
+  const card = buildV2CardFromStorePayload(body.card);
+  const filename = `${filenameFromCard(card)}.json`;
+  const payload = JSON.stringify(card, null, 2);
 
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    return res.send(payload);
-  } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
-  }
-});
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  return res.send(payload);
+}));
 
 // POST /api/cards/export/png
-cardsRouter.post("/export/png", async (req, res) => {
-  try {
-    const body = ExportPngSchema.parse(req.body);
-    const card = buildV2CardFromStorePayload(body.card);
-    const filename = `${filenameFromCard(card)}.png`;
-    const avatar = await fetchAvatarBuffer(req, body.avatarUrl);
-    const cardJson = JSON.stringify(card);
-    const output = embedCardIntoPng(avatar, cardJson);
+cardsRouter.post("/export/png", wrap(async (req, res) => {
+  const body = ExportPngSchema.parse(req.body);
+  const card = buildV2CardFromStorePayload(body.card);
+  const filename = `${filenameFromCard(card)}.png`;
+  const avatar = await fetchAvatarBuffer(req, body.avatarUrl);
+  const cardJson = JSON.stringify(card);
+  const output = embedCardIntoPng(avatar, cardJson);
 
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    return res.send(output);
-  } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
-  }
-});
+  res.setHeader("Content-Type", "image/png");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  return res.send(output);
+}));
 
 // POST /api/cards/export/avatar
-cardsRouter.post("/export/avatar", async (req, res) => {
-  try {
-    const body = ExportAvatarSchema.parse(req.body);
-    const avatar = await fetchAvatarBuffer(req, body.avatarUrl);
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Content-Disposition", `attachment; filename="avatar.png"`);
-    return res.send(avatar);
-  } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
-  }
-});
+cardsRouter.post("/export/avatar", wrap(async (req, res) => {
+  const body = ExportAvatarSchema.parse(req.body);
+  const avatar = await fetchAvatarBuffer(req, body.avatarUrl);
+  res.setHeader("Content-Type", "image/png");
+  res.setHeader("Content-Disposition", `attachment; filename="avatar.png"`);
+  return res.send(avatar);
+}));
 
 // POST /api/cards/import
-cardsRouter.post("/import", upload.single("file"), (req, res) => {
-  try {
-    const file = req.file;
-    if (!file) return res.status(200).json({ ok: false, error: "No file uploaded" });
+cardsRouter.post("/import", upload.single("file"), wrap((req, res) => {
+  const file = req.file;
+  if (!file) return fail(res, 400, "VALIDATION_ERROR", "No file uploaded");
 
-    const name = file.originalname.toLowerCase();
-    if (name.endsWith(".json")) {
-      const text = file.buffer.toString("utf-8");
-      const parsed = JSON.parse(text);
-      const cardV2 = normalizeImportedCard(parsed);
-      return res.json({ ok: true, cardV2 });
-    }
-
-    if (name.endsWith(".png")) {
-      const json = extractCardFromPng(file.buffer);
-      const parsed = JSON.parse(json);
-      const cardV2 = normalizeImportedCard(parsed);
-      const avatarDataUrl = `data:image/png;base64,${file.buffer.toString("base64")}`;
-      return res.json({ ok: true, cardV2, avatarDataUrl });
-    }
-
-    return res.status(200).json({ ok: false, error: "Unsupported file type" });
-  } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+  const name = file.originalname.toLowerCase();
+  if (name.endsWith(".json")) {
+    const text = file.buffer.toString("utf-8");
+    const parsed = JSON.parse(text);
+    const cardV2 = normalizeImportedCard(parsed);
+    return res.json({ ok: true, cardV2 });
   }
-});
+
+  if (name.endsWith(".png")) {
+    const json = extractCardFromPng(file.buffer);
+    const parsed = JSON.parse(json);
+    const cardV2 = normalizeImportedCard(parsed);
+    const avatarDataUrl = `data:image/png;base64,${file.buffer.toString("base64")}`;
+    return res.json({ ok: true, cardV2, avatarDataUrl });
+  }
+
+  return fail(res, 400, "VALIDATION_ERROR", "Unsupported file type");
+}));

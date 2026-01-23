@@ -1,6 +1,7 @@
 import { Router } from "express";
 import fs from "node:fs";
 import path from "node:path";
+import { fail, ok, wrap } from "../lib/api.js";
 
 export const fsRouter = Router();
 
@@ -20,17 +21,17 @@ function getWindowsRoots() {
 }
 
 // GET /api/fs/roots
-fsRouter.get("/roots", (req, res) => {
+fsRouter.get("/roots", wrap((req, res) => {
   const roots = process.platform === "win32" ? getWindowsRoots() : ["/"];
-  res.json({ ok: true, roots });
-});
+  return ok(res, { roots });
+}));
 
 // GET /api/fs/list?path=<absPath>
-fsRouter.get("/list", async (req, res) => {
+fsRouter.get("/list", wrap(async (req, res) => {
   try {
     const target = String(req.query.path || "");
     if (!target || !isSafeAbsolute(target)) {
-      return res.status(200).json({ ok: false, error: "Path must be an absolute path" });
+      return fail(res, 400, "VALIDATION_ERROR", "Path must be an absolute path");
     }
 
     const entries = await fs.promises.readdir(target, { withFileTypes: true });
@@ -49,8 +50,8 @@ fsRouter.get("/list", async (req, res) => {
       return path.dirname(normalized);
     })();
 
-    return res.json({ ok: true, path: target, parent, dirs });
+    return ok(res, { path: target, parent, dirs });
   } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    return fail(res, 500, "INTERNAL", String(e?.message ?? e));
   }
-});
+}));

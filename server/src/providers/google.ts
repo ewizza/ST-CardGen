@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, PersonGeneration } from "@google/genai";
 
 type GoogleImagenConfig = {
   model: string;
@@ -27,6 +27,11 @@ export async function generateGoogleImage(args: {
   cfgGoogle: GoogleImageConfig;
   apiKey: string;
 }): Promise<{ buffer: Buffer; mime: string }> {
+  const personGenerationMap: Record<GoogleImagenConfig["personGeneration"], PersonGeneration> = {
+    dont_allow: PersonGeneration.DONT_ALLOW,
+    allow_adult: PersonGeneration.ALLOW_ADULT,
+    allow_all: PersonGeneration.ALLOW_ALL,
+  };
   const mergedPrompt = args.negativePrompt
     ? `${args.prompt}\n\nAvoid: ${args.negativePrompt}`
     : args.prompt;
@@ -45,7 +50,7 @@ export async function generateGoogleImage(args: {
         numberOfImages: cfg.numberOfImages,
         imageSize: cfg.imageSize,
         aspectRatio: cfg.aspectRatio,
-        personGeneration: cfg.personGeneration,
+        personGeneration: personGenerationMap[cfg.personGeneration],
       },
     });
     const b64 = response.generatedImages?.[0]?.image?.imageBytes;

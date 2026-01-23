@@ -17,6 +17,9 @@ import { libraryRouter } from "./routes/library.js";
 import { textRouter } from "./routes/text.js";
 import { keysRouter } from "./routes/keys.js";
 import { jobsRouter } from "./routes/jobs.js";
+import { fail } from "./lib/api.js";
+import { zodToDetails } from "./lib/errorMap.js";
+import { ZodError } from "zod";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -48,8 +51,21 @@ export function createApp() {
   app.use("/api/keys", keysRouter);
 
   // If an /api route wasn't matched, return a JSON 404 (don't fall into SPA)
-  app.use("/api", (req, res) => {
-    res.status(404).json({ ok: false, error: "API route not found", path: req.originalUrl });
+  app.use("/api", (req: any, res: any) => {
+    return fail(res, 404, "NOT_FOUND", "API route not found", { path: req.originalUrl });
+  });
+
+  // Global error handler for JSON APIs
+  app.use((err: any, req: any, res: any, next: any) => {
+    if (res.headersSent) return next(err);
+    if (err instanceof ZodError) {
+      return fail(res, 400, "VALIDATION_ERROR", "Invalid request body", zodToDetails(err));
+    }
+    const message = String(err?.message ?? err);
+    const details = process.env.NODE_ENV !== "production"
+      ? { message, stack: err?.stack }
+      : undefined;
+    return fail(res, 500, "INTERNAL", "Unexpected server error", details);
   });
 
   // Serve generated images
@@ -64,7 +80,7 @@ export function createApp() {
     app.use(express.static(distDir));
 
     // SPA fallback for non-API routes only
-    app.get(/^\/(?!api).*/, (req, res) => {
+    app.get(/^\/(?!api).*/, (req: any, res: any) => {
       res.sendFile(indexHtml);
     });
   }

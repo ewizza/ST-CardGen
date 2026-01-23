@@ -223,15 +223,16 @@ async function connectProvider(provider: "comfyui" | "sdapi" | "koboldcpp" | "st
   loadingSS.value = true;
   try {
     const res = await connectImageProvider(provider);
-    const checkedAt = res.checkedAt || new Date().toISOString();
+    const details = (res.details ?? {}) as any;
+    const checkedAt = res.checkedAt || details.checkedAt || new Date().toISOString();
     const info = {
       ok: Boolean(res.ok),
       checkedAt,
-      baseUrl: res.baseUrl,
+      baseUrl: res.baseUrl ?? details.baseUrl ?? baseUrl.value,
       details: res.details,
-      samplers: res.samplers ?? [],
-      schedulers: res.schedulers ?? [],
-      warning: res.warning,
+      samplers: res.samplers ?? details.samplers ?? [],
+      schedulers: res.schedulers ?? details.schedulers ?? [],
+      warning: res.warning ?? details.warning,
       error: res.error,
     };
     cfg.config.image.providerInfo = cfg.config.image.providerInfo ?? {};

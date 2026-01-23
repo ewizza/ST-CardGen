@@ -2,6 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { getComfyBaseUrl } from "../adapters/comfyui/client.js";
 import { httpGetJson, httpPostJson, httpGetBuffer, isHttpRequestError } from "../utils/http.js";
+import { fail, ok, wrap } from "../lib/api.js";
+import { mapHttpRequestError, mapUnknownError } from "../lib/errorMap.js";
 
 export const comfyuiPromptRouter = Router();
 
@@ -12,38 +14,42 @@ const PromptRequestSchema = z.object({
 });
 
 // POST /api/comfyui/prompt
-comfyuiPromptRouter.post("/prompt", async (req, res) => {
+comfyuiPromptRouter.post("/prompt", wrap(async (req, res) => {
   const baseUrl = getComfyBaseUrl();
   try {
     const parsed = PromptRequestSchema.parse(req.body);
     const result = await httpPostJson(`${baseUrl}/prompt`, parsed, { timeoutMs: 15000 });
     // result usually contains { prompt_id: "..." }
-    res.json({ ok: true, baseUrl, result });
+    return ok(res, { baseUrl, result });
   } catch (e: any) {
     if (isHttpRequestError(e)) {
-      return res.status(200).json({ ok: false, error: e.message, details: e.details });
+      const mapped = mapHttpRequestError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
     }
-    res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+}));
 
 // GET /api/comfyui/history/:promptId
-comfyuiPromptRouter.get("/history/:promptId", async (req, res) => {
+comfyuiPromptRouter.get("/history/:promptId", wrap(async (req, res) => {
   const baseUrl = getComfyBaseUrl();
   try {
     const promptId = req.params.promptId;
     const hist = await httpGetJson(`${baseUrl}/history/${encodeURIComponent(promptId)}`, { timeoutMs: 8000 });
-    res.json({ ok: true, baseUrl, history: hist });
+    return ok(res, { baseUrl, history: hist });
   } catch (e: any) {
     if (isHttpRequestError(e)) {
-      return res.status(200).json({ ok: false, error: e.message, details: e.details });
+      const mapped = mapHttpRequestError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
     }
-    res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+}));
 
 // GET /api/comfyui/view?filename=...&type=output&subfolder=...
-comfyuiPromptRouter.get("/view", async (req, res) => {
+comfyuiPromptRouter.get("/view", wrap(async (req, res) => {
   const baseUrl = getComfyBaseUrl();
 
   const filename = String(req.query.filename ?? "");
@@ -51,7 +57,7 @@ comfyuiPromptRouter.get("/view", async (req, res) => {
   const subfolder = String(req.query.subfolder ?? "");
 
   if (!filename) {
-    return res.status(400).json({ ok: false, error: "Missing filename" });
+    return fail(res, 400, "VALIDATION_ERROR", "Missing filename");
   }
 
   const params = new URLSearchParams();
@@ -65,8 +71,10 @@ comfyuiPromptRouter.get("/view", async (req, res) => {
     return res.send(buffer);
   } catch (e: any) {
     if (isHttpRequestError(e)) {
-      return res.status(200).json({ ok: false, error: e.message, details: e.details });
+      const mapped = mapHttpRequestError(e);
+      return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
     }
-    res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    const mapped = mapUnknownError(e);
+    return fail(res, mapped.status, mapped.code, mapped.message, mapped.details);
   }
-});
+}));

@@ -12,6 +12,7 @@ import {
   deleteLibraryItem,
   transferLibraryItem,
 } from "../domain/library/store.js";
+import { fail, ok, wrap } from "../lib/api.js";
 
 export const libraryRouter = Router();
 
@@ -57,110 +58,120 @@ function getRepoIdFromQuery(req: any) {
 }
 
 // GET /api/library
-libraryRouter.get("/", (req, res) => {
-  try {
-    const repoId = getRepoIdFromQuery(req);
-    const { dir, items, repo } = listLibraryItems(repoId);
-    const withUrls = items.map((item) => ({
-      id: item.id,
-      name: item.name,
-      fileBase: item.fileBase,
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-      pngUrl: item.pngPath ? `/api/library/image/${item.id}?repo=${encodeURIComponent(repo.id)}` : null,
-      hasJson: Boolean(item.jsonPath),
-    }));
-    return res.json({ ok: true, dir, repo, items: withUrls });
-  } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
-  }
-});
+libraryRouter.get("/", wrap((req, res) => {
+  const repoId = getRepoIdFromQuery(req);
+  const { dir, items, repo } = listLibraryItems(repoId);
+  const withUrls = items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    fileBase: item.fileBase,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    pngUrl: item.pngPath ? `/api/library/image/${item.id}?repo=${encodeURIComponent(repo.id)}` : null,
+    hasJson: Boolean(item.jsonPath),
+  }));
+  return ok(res, { dir, repo, items: withUrls });
+}));
 
 // POST /api/library/save
-libraryRouter.post("/save", async (req, res) => {
+libraryRouter.post("/save", wrap(async (req, res) => {
   try {
     const body = SaveSchema.parse(req.body);
     let avatarPng: Buffer | null = null;
     const format = body.format ?? (body.avatarUrl ? "png" : "json");
     if (format === "png") {
-      if (!body.avatarUrl) throw new Error("No avatar image to save as PNG.");
+      if (!body.avatarUrl) return fail(res, 400, "VALIDATION_ERROR", "No avatar image to save as PNG.");
       avatarPng = await fetchAvatarBuffer(req, body.avatarUrl);
     }
 
     const { dir, id, repo } = saveLibraryCard(body.repoId, body.card, format, avatarPng);
-    return res.json({ ok: true, id, dir, repo });
+    return ok(res, { id, dir, repo });
   } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    return fail(res, 500, "INTERNAL", String(e?.message ?? e));
   }
-});
+}));
 
 // POST /api/library/update/:id
-libraryRouter.post("/update/:id", async (req, res) => {
+libraryRouter.post("/update/:id", wrap(async (req, res) => {
   try {
     const body = SaveSchema.parse(req.body);
     let avatarPng: Buffer | null = null;
     const format = body.format ?? (body.avatarUrl ? "png" : "json");
     if (format === "png") {
-      if (!body.avatarUrl) throw new Error("No avatar image to save as PNG.");
+      if (!body.avatarUrl) return fail(res, 400, "VALIDATION_ERROR", "No avatar image to save as PNG.");
       avatarPng = await fetchAvatarBuffer(req, body.avatarUrl);
     }
 
     const { dir, id, repo } = updateLibraryCard(body.repoId, req.params.id, body.card, format, avatarPng);
-    return res.json({ ok: true, id, dir, repo });
-  } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
-  }
-});
-
-// DELETE /api/library/:id
-libraryRouter.delete("/:id", (req, res) => {
-  try {
-    const repoId = getRepoIdFromQuery(req);
-    deleteLibraryItem(repoId, req.params.id);
-    return res.json({ ok: true });
+    return ok(res, { id, dir, repo });
   } catch (e: any) {
     const message = String(e?.message ?? e);
     if (message === "Card not found") {
-      return res.status(404).json({ ok: false, error: message });
+      return fail(res, 404, "NOT_FOUND", message);
     }
-    return res.status(500).json({ ok: false, error: message });
+    return fail(res, 500, "INTERNAL", message);
   }
-});
+}));
+
+// DELETE /api/library/:id
+libraryRouter.delete("/:id", wrap((req, res) => {
+  try {
+    const repoId = getRepoIdFromQuery(req);
+    deleteLibraryItem(repoId, req.params.id);
+    return ok(res);
+  } catch (e: any) {
+    const message = String(e?.message ?? e);
+    if (message === "Card not found") {
+      return fail(res, 404, "NOT_FOUND", message);
+    }
+    if (message === "Invalid file path") {
+      return fail(res, 400, "VALIDATION_ERROR", message);
+    }
+    return fail(res, 500, "INTERNAL", message);
+  }
+}));
 
 // GET /api/library/:id
-libraryRouter.get("/:id", (req, res) => {
+libraryRouter.get("/:id", wrap((req, res) => {
   try {
     const repoId = getRepoIdFromQuery(req);
     const { cardV2, hasPng, repo } = loadLibraryCard(repoId, req.params.id);
-    return res.json({
-      ok: true,
+    return ok(res, {
       cardV2,
       avatarPngUrl: hasPng ? `/api/library/image/${req.params.id}?repo=${encodeURIComponent(repo.id)}` : null,
     });
   } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    const message = String(e?.message ?? e);
+    if (message === "Card not found") {
+      return fail(res, 404, "NOT_FOUND", message);
+    }
+    return fail(res, 500, "INTERNAL", message);
   }
-});
+}));
 
 // GET /api/library/image/:id
-libraryRouter.get("/image/:id", (req, res) => {
+libraryRouter.get("/image/:id", (req: any, res: any) => {
   try {
     const repoId = getRepoIdFromQuery(req);
     const png = loadLibraryPng(repoId, req.params.id);
     res.setHeader("Content-Type", "image/png");
     return res.send(png);
   } catch (e: any) {
-    return res.status(404).json({ ok: false, error: String(e?.message ?? e) });
+    return fail(res, 404, "NOT_FOUND", String(e?.message ?? e));
   }
 });
 
 // POST /api/library/transfer
-libraryRouter.post("/transfer", (req, res) => {
+libraryRouter.post("/transfer", wrap((req, res) => {
   try {
     const body = TransferSchema.parse(req.body);
     const result = transferLibraryItem(body);
-    return res.json(result);
+    return ok(res, result);
   } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    const message = String(e?.message ?? e);
+    if (message === "Card not found" || message === "Image not found") {
+      return fail(res, 404, "NOT_FOUND", message);
+    }
+    return fail(res, 400, "VALIDATION_ERROR", message);
   }
-});
+}));

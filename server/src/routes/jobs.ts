@@ -1,6 +1,7 @@
 import express from "express";
 import { getJob, updateJob } from "../domain/jobs/imageJobs.js";
 import { httpGetJson, httpPostEmpty, httpPostJsonVoid, isHttpRequestError } from "../utils/http.js";
+import { fail, ok, wrap } from "../lib/api.js";
 
 export const jobsRouter = express.Router();
 
@@ -19,13 +20,13 @@ function extractPromptId(item: any): string | null {
  * GET /api/image/job/:jobId
  * Polls comfyui history to see if the job has produced an image.
  */
-jobsRouter.get("/job/:jobId", async (req, res) => {
+jobsRouter.get("/job/:jobId", wrap(async (req, res) => {
   const jobId = String(req.params.jobId || "");
   const job = getJob(jobId);
-  if (!job) return res.status(200).json({ ok: false, error: "Job not found", jobId });
+  if (!job) return fail(res, 404, "NOT_FOUND", "Job not found", { jobId });
 
   if (job.state === "error" || job.state === "done" || job.state === "canceled") {
-    return res.status(200).json({ ok: true, job });
+    return ok(res, { job });
   }
 
   const { baseUrl, promptId } = job.data;
@@ -92,32 +93,32 @@ jobsRouter.get("/job/:jobId", async (req, res) => {
       });
 
       const done = getJob(jobId)!;
-      return res.status(200).json({ ok: true, job: done });
+      return ok(res, { job: done });
     }
 
     // Not done yet
     updateJob(jobId, { state: "running", progress: Math.min((job.progress ?? 0.1) + 0.05, 0.95), message: "Running" });
     const updated = getJob(jobId)!;
-    return res.status(200).json({ ok: true, job: updated });
+    return ok(res, { job: updated });
   } catch (e: any) {
     if (isHttpRequestError(e)) {
       updateJob(jobId, { state: "error", error: e.message, details: e.details, message: "Error polling history" });
       const updated = getJob(jobId)!;
-      return res.status(200).json({ ok: true, job: updated });
+      return ok(res, { job: updated });
     }
     updateJob(jobId, { state: "error", error: String(e?.message ?? e), message: "Error polling history" });
     const updated = getJob(jobId)!;
-    return res.status(200).json({ ok: true, job: updated });
+    return ok(res, { job: updated });
   }
-});
+}));
 
-jobsRouter.post("/job/:jobId/cancel", async (req, res) => {
+jobsRouter.post("/job/:jobId/cancel", wrap(async (req, res) => {
   const jobId = String(req.params.jobId || "");
   const job = getJob(jobId);
-  if (!job) return res.status(200).json({ ok: false, error: "Job not found", jobId });
+  if (!job) return fail(res, 404, "NOT_FOUND", "Job not found", { jobId });
 
   if (job.state === "done" || job.state === "error" || job.state === "canceled") {
-    return res.status(200).json({ ok: true, job });
+    return ok(res, { job });
   }
 
   const { baseUrl, promptId } = job.data;
@@ -130,13 +131,13 @@ jobsRouter.post("/job/:jobId/cancel", async (req, res) => {
     await httpPostEmpty(`${baseUrl}/interrupt`, { timeoutMs: 8000 }).catch(() => {});
 
     updateJob(jobId, { state: "canceled", progress: 0, message: "Canceled" });
-    return res.status(200).json({ ok: true, job: getJob(jobId) });
+    return ok(res, { job: getJob(jobId) });
   } catch (e: any) {
     if (isHttpRequestError(e)) {
       updateJob(jobId, { state: "error", error: e.message, details: e.details, message: "Cancel failed" });
-      return res.status(200).json({ ok: true, job: getJob(jobId) });
+      return ok(res, { job: getJob(jobId) });
     }
     updateJob(jobId, { state: "error", error: String(e?.message ?? e), message: "Cancel failed" });
-    return res.status(200).json({ ok: true, job: getJob(jobId) });
+    return ok(res, { job: getJob(jobId) });
   }
-});
+}));

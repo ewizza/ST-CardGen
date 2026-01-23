@@ -6,6 +6,7 @@ import { generateText } from "../adapters/text/provider.js";
 import { loadConfig } from "../config/store.js";
 import { buildCharacterGenPrompt, buildFillMissingPrompt, buildImagePrompt, buildRegeneratePrompt } from "../domain/character/prompt.js";
 import { parseCharacterResponse, tryParseJson } from "../domain/character/parse.js";
+import { fail, ok, wrap } from "../lib/api.js";
 
 export const characterRouter = Router();
 
@@ -197,7 +198,7 @@ function defaultNegativePrompt(contentRating: "sfw" | "nsfw_allowed") {
 }
 
 // POST /api/character/generate
-characterRouter.post("/generate", async (req, res) => {
+characterRouter.post("/generate", wrap(async (req, res) => {
   const rawLimit = 8000;
   let raw: string | null = null;
   try {
@@ -220,23 +221,22 @@ characterRouter.post("/generate", async (req, res) => {
     if (!character.negative_prompt?.trim()) {
       character.negative_prompt = defaultNegativePrompt(contentRating);
     }
-    return res.json({ ok: true, character });
+    return ok(res, { character });
   } catch (e: any) {
-    return res.status(200).json({
-      ok: false,
-      error: String(e?.message ?? e),
-      raw: raw ? raw.slice(0, rawLimit) : undefined,
-    });
+    if (e instanceof z.ZodError) throw e;
+    const message = String(e?.message ?? e);
+    const details = raw ? { raw: raw.slice(0, rawLimit) } : undefined;
+    return fail(res, 502, "PROVIDER_ERROR", message, details);
   }
-});
+}));
 
 // POST /api/character/fill-missing
-characterRouter.post("/fill-missing", async (req, res) => {
+characterRouter.post("/fill-missing", wrap(async (req, res) => {
   try {
     const body = FillMissingSchema.parse(req.body);
     const missingKeys = pickMissingKeys(body.card);
     if (!missingKeys.length) {
-      return res.json({ ok: true, patch: {} });
+      return ok(res, { patch: {} });
     }
 
     const cfg = loadConfig();
@@ -255,32 +255,27 @@ characterRouter.post("/fill-missing", async (req, res) => {
     const raw = await generateText("", prompt);
     const parsed = tryParseJson(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return res.status(200).json({
-        ok: false,
-        error: "Invalid JSON from LLM",
-        raw: raw.slice(0, 8000),
-      });
+      return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", { raw: raw.slice(0, 8000) });
     }
 
     const validated = PatchSchema.safeParse(parsed);
     if (!validated.success) {
-      return res.status(200).json({
-        ok: false,
-        error: "LLM JSON did not match patch schema",
+      return fail(res, 502, "PROVIDER_BAD_RESPONSE", "LLM JSON did not match patch schema", {
         issues: validated.error.issues,
         raw: raw.slice(0, 8000),
       });
     }
 
     const filtered = filterPatchToMissing(validated.data, missingKeys);
-    return res.json({ ok: true, patch: filtered });
+    return ok(res, { patch: filtered });
   } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    if (e instanceof z.ZodError) throw e;
+    return fail(res, 502, "PROVIDER_ERROR", String(e?.message ?? e));
   }
-});
+}));
 
 // POST /api/character/image-prompt
-characterRouter.post("/image-prompt", async (req, res) => {
+characterRouter.post("/image-prompt", wrap(async (req, res) => {
   try {
     const body = z.object({
       card: z.object({
@@ -305,18 +300,12 @@ characterRouter.post("/image-prompt", async (req, res) => {
     const raw = await generateText("", prompt);
     const parsed = tryParseJson(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return res.status(200).json({
-        ok: false,
-        error: "Invalid JSON from LLM",
-        raw: raw.slice(0, 8000),
-      });
+      return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", { raw: raw.slice(0, 8000) });
     }
 
     const validated = ImagePromptSchema.safeParse(parsed);
     if (!validated.success) {
-      return res.status(200).json({
-        ok: false,
-        error: "LLM JSON did not match image prompt schema",
+      return fail(res, 502, "PROVIDER_BAD_RESPONSE", "LLM JSON did not match image prompt schema", {
         issues: validated.error.issues,
         raw: raw.slice(0, 8000),
       });
@@ -326,14 +315,15 @@ characterRouter.post("/image-prompt", async (req, res) => {
     if (!payload.negative_prompt?.trim()) {
       payload.negative_prompt = defaultNegativePrompt(contentRating);
     }
-    return res.json({ ok: true, ...payload });
+    return ok(res, { ...payload });
   } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    if (e instanceof z.ZodError) throw e;
+    return fail(res, 502, "PROVIDER_ERROR", String(e?.message ?? e));
   }
-});
+}));
 
 // POST /api/character/regenerate
-characterRouter.post("/regenerate", async (req, res) => {
+characterRouter.post("/regenerate", wrap(async (req, res) => {
   try {
     const body = RegenerateSchema.parse(req.body);
     const targets = Object.entries(body.keep)
@@ -341,7 +331,7 @@ characterRouter.post("/regenerate", async (req, res) => {
       .map(([key]) => key);
 
     if (!targets.length) {
-      return res.json({ ok: true, patch: {} });
+      return ok(res, { patch: {} });
     }
 
     let lastFiltered: Record<string, any> = {};
@@ -366,18 +356,12 @@ characterRouter.post("/regenerate", async (req, res) => {
       const raw = await generateText("", prompt, regenParams);
       const parsed = tryParseJson(raw);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return res.status(200).json({
-          ok: false,
-          error: "Invalid JSON from LLM",
-          raw: raw.slice(0, 8000),
-        });
+        return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", { raw: raw.slice(0, 8000) });
       }
 
       const validated = RegeneratePatchSchema.safeParse(parsed);
       if (!validated.success) {
-        return res.status(200).json({
-          ok: false,
-          error: "LLM JSON did not match patch schema",
+        return fail(res, 502, "PROVIDER_BAD_RESPONSE", "LLM JSON did not match patch schema", {
           issues: validated.error.issues,
           raw: raw.slice(0, 8000),
         });
@@ -386,7 +370,7 @@ characterRouter.post("/regenerate", async (req, res) => {
       const filtered = filterPatchToTargets(validated.data, targets);
       lastFiltered = filtered;
       const anyDifferent = targets.some((key) => {
-        const existingValue = body.card[key];
+        const existingValue = (body.card as Record<string, any>)[key];
         const regenerated = filtered[key];
         if (existingValue === undefined || existingValue === null) {
           return !isMissingValue(regenerated);
@@ -395,12 +379,13 @@ characterRouter.post("/regenerate", async (req, res) => {
       });
 
       if (anyDifferent) {
-        return res.json({ ok: true, patch: filtered });
+        return ok(res, { patch: filtered });
       }
     }
 
-    return res.json({ ok: true, patch: lastFiltered });
+    return ok(res, { patch: lastFiltered });
   } catch (e: any) {
-    return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
+    if (e instanceof z.ZodError) throw e;
+    return fail(res, 502, "PROVIDER_ERROR", String(e?.message ?? e));
   }
-});
+}));
