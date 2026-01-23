@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
+import fs from "node:fs";
+import { ensureOutputDir } from "../lib/imageStore.js";
 
 export type StabilityGenerateOptions = {
   prompt: string;
@@ -16,12 +17,6 @@ type StabilityGenerateResult = { filename: string };
 
 function normalizeBaseUrl(url: string) {
   return url.replace(/\/+$/, "");
-}
-
-function ensureOutputDir() {
-  const dir = path.resolve(process.cwd(), "output");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return dir;
 }
 
 function getFileExt(outputFormat?: string) {
@@ -58,7 +53,7 @@ export async function stabilityGenerate(opts: StabilityGenerateOptions): Promise
 
   const arrayBuffer = await resp.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
-  const outputDir = ensureOutputDir();
+  const outputDir = await ensureOutputDir();
   const stamp = Date.now();
   const rand = crypto.randomBytes(6).toString("hex");
   const ext = getFileExt(opts.outputFormat);

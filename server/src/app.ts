@@ -18,6 +18,7 @@ import { textRouter } from "./routes/text.js";
 import { keysRouter } from "./routes/keys.js";
 import { jobsRouter } from "./routes/jobs.js";
 import { fail } from "./lib/api.js";
+import { getOutputDirPath } from "./lib/imageStore.js";
 import { zodToDetails } from "./lib/errorMap.js";
 import { ZodError } from "zod";
 
@@ -69,7 +70,7 @@ export function createApp() {
   });
 
   // Serve generated images
-  const outputDir = path.resolve(process.cwd(), "output");
+  const outputDir = getOutputDirPath();
   app.use("/output", express.static(outputDir));
 
   // --- Static UI serving (production only / when built dist exists) ---

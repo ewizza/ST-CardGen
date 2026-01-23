@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { InferenceClient } from "@huggingface/inference";
+import { ensureOutputDir } from "../lib/imageStore.js";
 
 export type HuggingFaceTextToImageArgs = {
   accessToken: string;
@@ -16,12 +17,6 @@ export type HuggingFaceTextToImageArgs = {
 };
 
 export type HuggingFaceTextToImageResult = { fileName: string };
-
-function ensureOutputDir() {
-  const dir = path.resolve(process.cwd(), "output");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
 
 function bufferFromDataUrl(dataUrl: string): Buffer | null {
   if (!dataUrl.startsWith("data:")) return null;
@@ -68,7 +63,7 @@ export async function huggingfaceTextToImage(args: HuggingFaceTextToImageArgs): 
     });
 
     const buffer = await toBuffer(output);
-    const dir = ensureOutputDir();
+    const dir = await ensureOutputDir();
     const stamp = Date.now();
     const rand = crypto.randomBytes(6).toString("hex");
     const fileName = `hf_${stamp}_${rand}.png`;

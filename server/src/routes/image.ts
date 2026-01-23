@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { z } from "zod";
-import crypto from "node:crypto";
 
 import { loadConfig, saveConfig } from "../config/store.js";
 import { getComfyBaseUrl, getObjectInfo } from "../adapters/comfyui/client.js";
@@ -15,26 +14,10 @@ import { getKey } from "../services/keyStore.js";
 import { httpGetJson, httpPostJson, isHttpRequestError } from "../utils/http.js";
 import { fail, ok, wrap } from "../lib/api.js";
 import { mapHttpRequestError, mapUnknownError } from "../lib/errorMap.js";
+import { savePngBuffer } from "../lib/imageStore.js";
 
 export const imageRouter = Router();
 
-type StoredResult = { buffer: Buffer; mime: string; createdAt: number };
-const RESULT_TTL_MS = 5 * 60 * 1000;
-const results = new Map<string, StoredResult>();
-
-function cleanupResults() {
-  const now = Date.now();
-  for (const [id, r] of results.entries()) {
-    if (now - r.createdAt > RESULT_TTL_MS) results.delete(id);
-  }
-}
-
-function putResult(buffer: Buffer, mime = "image/png") {
-  cleanupResults();
-  const id = crypto.randomUUID();
-  results.set(id, { buffer, mime, createdAt: Date.now() });
-  return id;
-}
 
 function decodeBase64Image(b64: string): Buffer {
   const idx = b64.indexOf("base64,");
@@ -103,17 +86,6 @@ function applyLoraSettings(workflow: Record<string, any>, cfg: any) {
   }
   return workflow;
 }
-
-// GET /api/image/result/:id
-imageRouter.get("/result/:id", (req: any, res: any) => {
-  const id = String(req.params.id || "");
-  const r = results.get(id);
-  if (!r) return fail(res, 404, "NOT_FOUND", "Image result not found");
-
-  res.setHeader("Content-Type", r.mime);
-  res.setHeader("Cache-Control", "no-store");
-  return res.status(200).send(r.buffer);
-});
 
 // GET /api/image/comfyui/workflows
 imageRouter.get("/comfyui/workflows", wrap(async (req, res) => {
@@ -394,14 +366,14 @@ imageRouter.post("/generate", wrap(async (req, res) => {
         return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
       }
       try {
-        const { buffer, mime } = await generateGoogleImage({
+        const { buffer } = await generateGoogleImage({
           prompt: body.prompt,
           negativePrompt: body.negativePrompt || undefined,
           cfgGoogle,
           apiKey,
         });
-        const id = putResult(buffer, mime);
-        return ok(res, { provider, imageUrl: `/api/image/result/${encodeURIComponent(id)}` });
+        const saved = await savePngBuffer(buffer, { prefix: "google" });
+        return ok(res, { provider, imageUrl: saved.urlPath });
       } catch (e: any) {
         if (isHttpRequestError(e)) {
           const mapped = mapHttpRequestError(e);
@@ -520,11 +492,11 @@ imageRouter.post("/generate", wrap(async (req, res) => {
         return fail(res, 502, "PROVIDER_BAD_RESPONSE", "SDAPI did not return any images", { out });
       }
       const buf = decodeBase64Image(firstImage);
-      const id = putResult(buf, "image/png");
+      const saved = await savePngBuffer(buf, { prefix: provider });
       return ok(res, {
         provider,
         seed,
-        imageUrl: `/api/image/result/${encodeURIComponent(id)}?_fmt=png`,
+        imageUrl: saved.urlPath,
         imageBase64: firstImage,
       });
     }

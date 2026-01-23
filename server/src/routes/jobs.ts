@@ -1,7 +1,8 @@
 import express from "express";
 import { getJob, updateJob } from "../domain/jobs/imageJobs.js";
-import { httpGetJson, httpPostEmpty, httpPostJsonVoid, isHttpRequestError } from "../utils/http.js";
+import { httpGetBuffer, httpGetJson, httpPostEmpty, httpPostJsonVoid, isHttpRequestError } from "../utils/http.js";
 import { fail, ok, wrap } from "../lib/api.js";
+import { savePngBuffer } from "../lib/imageStore.js";
 
 export const jobsRouter = express.Router();
 
@@ -77,7 +78,7 @@ jobsRouter.get("/job/:jobId", wrap(async (req, res) => {
     }
 
     if (found) {
-      // Build a server-local URL so the frontend doesn't hit Comfy directly.
+      // Fetch the image from ComfyUI and persist it to /output.
       const params = new URLSearchParams({
         filename: found.filename,
         subfolder: found.subfolder,
@@ -85,11 +86,15 @@ jobsRouter.get("/job/:jobId", wrap(async (req, res) => {
         baseUrl,
       });
 
+      const viewUrl = `/api/comfyui/view?${params.toString()}`;
+      const { buffer } = await httpGetBuffer(`${baseUrl}/view?${params.toString()}`, { timeoutMs: 15000 });
+      const saved = await savePngBuffer(buffer, { prefix: "comfyui" });
+
       updateJob(jobId, {
         state: "done",
         progress: 1,
         message: "Complete",
-        result: { ...found, imageUrl: `/api/comfyui/view?${params.toString()}` },
+        result: { ...found, imageUrl: saved.urlPath },
       });
 
       const done = getJob(jobId)!;
