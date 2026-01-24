@@ -76,23 +76,25 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 ENV NODE_ENV=production \
     PORT=3001
 
-# Create entrypoint script to fix permissions
-RUN mkdir -p /usr/local/bin && \
-    echo '#!/bin/sh' > /usr/local/bin/entrypoint.sh && \
-    echo 'set -e' >> /usr/local/bin/entrypoint.sh && \
-    echo '# Fix permissions for mounted volumes' >> /usr/local/bin/entrypoint.sh && \
-    echo 'if [ -d /app/server/data ]; then' >> /usr/local/bin/entrypoint.sh && \
-    echo '  chown -R nodejs:nodejs /app/server/data 2>/dev/null || true' >> /usr/local/bin/entrypoint.sh && \
-    echo 'fi' >> /usr/local/bin/entrypoint.sh && \
-    echo 'if [ -d /app/server/output ]; then' >> /usr/local/bin/entrypoint.sh && \
-    echo '  chown -R nodejs:nodejs /app/server/output 2>/dev/null || true' >> /usr/local/bin/entrypoint.sh && \
-    echo 'fi' >> /usr/local/bin/entrypoint.sh && \
-    echo '# Execute the main command' >> /usr/local/bin/entrypoint.sh && \
-    echo 'exec "$@"' >> /usr/local/bin/entrypoint.sh && \
-    chmod +x /usr/local/bin/entrypoint.sh
+# Install su-exec for dropping privileges
+RUN apk add --no-cache su-exec
 
-# Switch to non-root user
-USER nodejs
+# Create entrypoint script to fix permissions then drop to nodejs user
+RUN printf '#!/bin/sh\n\
+set -e\n\
+\n\
+# Fix permissions for mounted volumes (running as root initially)\n\
+if [ -d /app/server/data ]; then\n\
+  chown -R nodejs:nodejs /app/server/data 2>/dev/null || true\n\
+fi\n\
+if [ -d /app/server/output ]; then\n\
+  chown -R nodejs:nodejs /app/server/output 2>/dev/null || true\n\
+fi\n\
+\n\
+# Drop privileges and execute the main command as nodejs user\n\
+exec su-exec nodejs "$@"\n\
+' > /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 
+# Run entrypoint as root so it can fix permissions, then drops to nodejs
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["node", "dist/index.js"]

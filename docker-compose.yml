@@ -1,7 +1,7 @@
 services:
   st-cardgen:
     image: ghcr.io/frackena/st-cardgen:latest
-    user: "${UID:-1001}:${GID:-1001}"  # Map to host user, fallback to nodejs uid
+    # Removed user: directive - entrypoint handles permissions and drops to nodejs
     ports:
       - "3001:3001"
     volumes:
@@ -10,7 +10,12 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-    # Uncomment to load API keys from .env file (copy sample.env to .env first):
+      # API keys can be set via environment variables with CCG_KEY_ prefix:
+      # - CCG_KEY_OPENAI=sk-your-key-here
+      # - CCG_KEY_STABILITY=your-stability-key
+      # - CCG_KEY_HUGGINGFACE=hf_your_token
+      # - CCG_KEY_GOOGLE=your-google-api-key
+    # Uncomment to load API keys from .env file:
     # env_file:
     #   - .env
     # Uncomment to use Docker secrets (Swarm mode or compose secrets):
