@@ -11,6 +11,8 @@ import {
   updateLibraryCard,
   deleteLibraryItem,
   transferLibraryItem,
+  type LibraryTransferMode,
+  type LibraryTransferFormat,
 } from "../domain/library/store.js";
 
 export const libraryRouter = Router();
@@ -158,7 +160,13 @@ libraryRouter.get("/image/:id", (req, res) => {
 libraryRouter.post("/transfer", (req, res) => {
   try {
     const body = TransferSchema.parse(req.body);
-    const result = transferLibraryItem(body);
+    const result = transferLibraryItem(body as {
+      fromRepoId?: string;
+      toRepoId?: string;
+      id: string;
+      mode: LibraryTransferMode;
+      destFormat?: LibraryTransferFormat;
+    });
     return res.json(result);
   } catch (e: any) {
     return res.status(200).json({ ok: false, error: String(e?.message ?? e) });

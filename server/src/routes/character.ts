@@ -6,6 +6,7 @@ import { generateText } from "../adapters/text/provider.js";
 import { loadConfig } from "../config/store.js";
 import { buildCharacterGenPrompt, buildFillMissingPrompt, buildImagePrompt, buildRegeneratePrompt } from "../domain/character/prompt.js";
 import { parseCharacterResponse, tryParseJson } from "../domain/character/parse.js";
+import { type FieldDetailSettings } from "../domain/character/fieldDetail.js";
 
 export const characterRouter = Router();
 
@@ -204,7 +205,7 @@ characterRouter.post("/generate", async (req, res) => {
     const body = GenerateSchema.parse(req.body);
     const cfg = loadConfig();
     const contentRating = cfg.generation?.contentRating ?? "nsfw_allowed";
-    const fieldDetail = cfg.generation?.fieldDetail;
+    const fieldDetail = cfg.generation?.fieldDetail as FieldDetailSettings;
     const prompt = buildCharacterGenPrompt(
       {
         idea: body.idea,
@@ -240,7 +241,7 @@ characterRouter.post("/fill-missing", async (req, res) => {
     }
 
     const cfg = loadConfig();
-    const fieldDetail = cfg.generation?.fieldDetail;
+    const fieldDetail = cfg.generation?.fieldDetail as FieldDetailSettings;
     const prompt = buildFillMissingPrompt(
       {
         card: body.card,
@@ -348,7 +349,7 @@ characterRouter.post("/regenerate", async (req, res) => {
     const maxTokens = body.maxTokens;
     const regenParams = maxTokens ? { max_tokens: maxTokens } : undefined;
     const cfg = loadConfig();
-    const fieldDetail = cfg.generation?.fieldDetail;
+    const fieldDetail = cfg.generation?.fieldDetail as FieldDetailSettings;
     for (let attempt = 0; attempt < 3; attempt++) {
       const prompt = buildRegeneratePrompt(
         {

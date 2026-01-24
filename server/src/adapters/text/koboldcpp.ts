@@ -92,43 +92,48 @@ export async function koboldGenerateText(
   if (max_tokens !== undefined) chatBody.max_tokens = max_tokens;
 
   const chat = await postJson(`${baseUrl}/v1/chat/completions`, chatBody, timeoutMs);
-  if (!chat.ok && (chat.status === 404 || chat.status === 405)) {
-    const completionBody: any = { prompt: `${systemPrompt}\n\n${userPrompt}`.trim() };
-    if (model) completionBody.model = model;
-    if (temperature !== undefined) completionBody.temperature = temperature;
-    if (top_p !== undefined) completionBody.top_p = top_p;
-    if (max_tokens !== undefined) completionBody.max_tokens = max_tokens;
-    const completion = await postJson(`${baseUrl}/v1/completions`, completionBody, timeoutMs);
-    if (!completion.ok) {
-      const snippet = completion.text.slice(0, 500);
-      if (completion.status === 0 && completion.statusText === "TIMEOUT") {
-        throw new Error(
-          `KoboldCPP request timed out after ${Math.round(timeoutMs / 1000)}s. ` +
-          "Increase \"Text Completion -> Request timeout\" in Settings, or reduce Max Tokens / use a shorter field preset."
-        );
+  if (!chat.ok) {
+    const err = chat as { ok: false; status: number; statusText: string; text: string };
+    if (err.status === 404 || err.status === 405) {
+      const completionBody: any = { prompt: `${systemPrompt}\n\n${userPrompt}`.trim() };
+      if (model) completionBody.model = model;
+      if (temperature !== undefined) completionBody.temperature = temperature;
+      if (top_p !== undefined) completionBody.top_p = top_p;
+      if (max_tokens !== undefined) completionBody.max_tokens = max_tokens;
+      const completion = await postJson(`${baseUrl}/v1/completions`, completionBody, timeoutMs);
+      if (!completion.ok) {
+        const err2 = completion as { ok: false; status: number; statusText: string; text: string };
+        const snippet = err2.text.slice(0, 500);
+        if (err2.status === 0 && err2.statusText === "TIMEOUT") {
+          throw new Error(
+            `KoboldCPP request timed out after ${Math.round(timeoutMs / 1000)}s. ` +
+            "Increase \"Text Completion -> Request timeout\" in Settings, or reduce Max Tokens / use a shorter field preset."
+          );
+        }
+        if (err2.status === 0 && err2.statusText === "NETWORK") {
+          throw new Error(`KoboldCPP network error: ${snippet}`.trim());
+        }
+        throw new Error(`KoboldCPP error: HTTP ${err2.status} ${err2.statusText} ${snippet}`.trim());
       }
-      if (completion.status === 0 && completion.statusText === "NETWORK") {
-        throw new Error(`KoboldCPP network error: ${snippet}`.trim());
-      }
-      throw new Error(`KoboldCPP error: HTTP ${completion.status} ${completion.statusText} ${snippet}`.trim());
+      const text = extractCompletionText(completion.json);
+      if (!text) throw new Error("KoboldCPP response missing completion text.");
+      return text;
     }
-    const text = extractCompletionText(completion.json);
-    if (!text) throw new Error("KoboldCPP response missing completion text.");
-    return text;
   }
 
   if (!chat.ok) {
-    const snippet = chat.text.slice(0, 500);
-    if (chat.status === 0 && chat.statusText === "TIMEOUT") {
+    const err = chat as { ok: false; status: number; statusText: string; text: string };
+    const snippet = err.text.slice(0, 500);
+    if (err.status === 0 && err.statusText === "TIMEOUT") {
       throw new Error(
         `KoboldCPP request timed out after ${Math.round(timeoutMs / 1000)}s. ` +
         "Increase \"Text Completion -> Request timeout\" in Settings, or reduce Max Tokens / use a shorter field preset."
       );
     }
-    if (chat.status === 0 && chat.statusText === "NETWORK") {
+    if (err.status === 0 && err.statusText === "NETWORK") {
       throw new Error(`KoboldCPP network error: ${snippet}`.trim());
     }
-    throw new Error(`KoboldCPP error: HTTP ${chat.status} ${chat.statusText} ${snippet}`.trim());
+    throw new Error(`KoboldCPP error: HTTP ${err.status} ${err.statusText} ${snippet}`.trim());
   }
 
   const content = extractChatContent(chat.json);

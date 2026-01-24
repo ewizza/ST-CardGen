@@ -1,11 +1,11 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, PersonGeneration } from "@google/genai";
 
 type GoogleImagenConfig = {
   model: string;
   numberOfImages: number;
   imageSize: "1K" | "2K";
   aspectRatio: string;
-  personGeneration: "dont_allow" | "allow_adult" | "allow_all";
+  personGeneration?: "dont_allow" | "allow_adult" | "allow_all";
 };
 
 type GoogleNanoConfig = {
@@ -45,7 +45,7 @@ export async function generateGoogleImage(args: {
         numberOfImages: cfg.numberOfImages,
         imageSize: cfg.imageSize,
         aspectRatio: cfg.aspectRatio,
-        personGeneration: cfg.personGeneration,
+        personGeneration: cfg.personGeneration as PersonGeneration,
       },
     });
     const b64 = response.generatedImages?.[0]?.image?.imageBytes;
