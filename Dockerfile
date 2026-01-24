@@ -36,7 +36,7 @@ ARG REPO_URL
 
 # OCI image labels
 LABEL org.opencontainers.image.title="ST-CardGen" \
-      org.opencontainers.image.description="Character card generator for SillyTavern" \
+      org.opencontainers.image.description="Character card generator  for SillyTavern" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
