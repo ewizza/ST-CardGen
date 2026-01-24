@@ -88,10 +88,6 @@ jobs:
           platforms: linux/amd64
           push: false
           tags: st-cardgen:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            REPO_URL=${{ github.server_url }}/${{ github.repository }}
 
       - name: Debug Show Docker images
         run: docker images
