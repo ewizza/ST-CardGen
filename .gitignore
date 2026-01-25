@@ -17,6 +17,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+!sample.env
 
 # -------------------------
 # Node / Package managers

@@ -15,9 +15,9 @@ services:
       # - CCG_KEY_STABILITY=your-stability-key
       # - CCG_KEY_HUGGINGFACE=hf_your_token
       # - CCG_KEY_GOOGLE=your-google-api-key
-    # Uncomment to load API keys from .env file:
-    # env_file:
-    #   - .env
+    # Load API keys from .env file (create .env with CCG_KEY_GOOGLE=xxx etc.)
+    env_file:
+      - .env
     # Uncomment to use Docker secrets (Swarm mode or compose secrets):
     # secrets:
     #   - cardgen_keys
@@ -27,15 +27,6 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
-    # Resource limits to prevent runaway memory/CPU usage
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 256M
     # Restart policy
     restart: unless-stopped
     # Security options
