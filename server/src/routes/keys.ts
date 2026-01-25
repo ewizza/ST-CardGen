@@ -10,7 +10,7 @@ export const keysRouter = Router();
 keysRouter.get("/", async (req, res) => {
   try {
     const keys = await listKeys();
-    return res.json({ ok: true, keys: keys.map((key) => ({ name: key.name })) });
+    return res.json({ ok: true, keys: keys.map((key) => ({ name: key.name, source: key.source })) });
   } catch (e: any) {
     return res.status(200).json({ ok: false, error: String(e?.message ?? e) });
   }

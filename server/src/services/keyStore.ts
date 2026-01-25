@@ -160,18 +160,40 @@ export async function getKey(nameOrId: string): Promise<string | null> {
   if (!name) return null;
   
   // 1. Check environment variables first (highest priority)
+  // Env keys are stored lowercase, so check both exact and lowercase
   const envKeys = getEnvKeys();
   const envKey = envKeys[name.toLowerCase()] || envKeys[name];
-  if (envKey) return envKey;
+  if (envKey) {
+    console.log(`[keyStore] Found key "${name}" from environment variable`);
+    return envKey;
+  }
   
   // 2. Try keytar
   const useKeytar = await initKeytar();
   if (useKeytar && keytar) {
     const keytarValue = await keytar.getPassword(SERVICE, name);
-    if (keytarValue) return keytarValue;
+    if (keytarValue) {
+      console.log(`[keyStore] Found key "${name}" from system keychain`);
+      return keytarValue;
+    }
   }
   
-  // 3. File fallback
+  // 3. File fallback - try exact match first, then case-insensitive
   const keys = loadFallbackKeys();
-  return keys[name] || null;
+  if (keys[name]) {
+    console.log(`[keyStore] Found key "${name}" from file storage`);
+    return keys[name];
+  }
+  
+  // Case-insensitive fallback for file keys
+  const lowerName = name.toLowerCase();
+  for (const [keyName, keyValue] of Object.entries(keys)) {
+    if (keyName.toLowerCase() === lowerName) {
+      console.log(`[keyStore] Found key "${name}" from file storage (case-insensitive match: "${keyName}")`);
+      return keyValue;
+    }
+  }
+  
+  console.log(`[keyStore] Key "${name}" not found in any storage`);
+  return null;
 }
