@@ -10,7 +10,7 @@ import { listWorkflows, loadBindingsForWorkflow, loadWorkflow } from "../domain/
 import { createComfyJob, updateJob } from "../domain/jobs/imageJobs.js";
 import { stabilityGenerate } from "../providers/stability.js";
 import { huggingfaceTextToImage } from "../providers/huggingface.js";
-import { generateGoogleImage } from "../providers/google.js";
+import { generateGoogleImage, type GoogleImageConfig } from "../providers/google.js";
 import { getKey } from "../services/keyStore.js";
 import { httpGetJson, httpPostJson, isHttpRequestError } from "../utils/http.js";
 
@@ -418,7 +418,7 @@ imageRouter.post("/generate", async (req, res) => {
         const { buffer, mime } = await generateGoogleImage({
           prompt: body.prompt,
           negativePrompt: body.negativePrompt || undefined,
-          cfgGoogle,
+          cfgGoogle: cfgGoogle as GoogleImageConfig,
           apiKey,
         });
         const id = putResult(buffer, mime);
@@ -456,7 +456,7 @@ imageRouter.post("/generate", async (req, res) => {
           prompt: body.prompt,
           negativePrompt: body.negativePrompt || undefined,
           model,
-          provider: hfProvider,
+          provider: hfProvider as "hf-inference" | "baseten" | "black-forest-labs" | "cerebras" | "clarifai" | "cohere" | "fal-ai" | "featherless-ai" | "fireworks-ai" | "groq" | "hyperbolic" | "nebius" | "novita" | "replicate" | "sambanova" | "together" | "auto",
           width: cfg.image.width,
           height: cfg.image.height,
           steps: cfg.image.steps,

@@ -8,7 +8,7 @@ export type HuggingFaceTextToImageArgs = {
   prompt: string;
   negativePrompt?: string;
   model: string;
-  provider?: string;
+  provider?: "hf-inference" | "baseten" | "black-forest-labs" | "cerebras" | "clarifai" | "cohere" | "fal-ai" | "featherless-ai" | "fireworks-ai" | "groq" | "hyperbolic" | "nebius" | "novita" | "replicate" | "sambanova" | "together" | "auto";
   width: number;
   height: number;
   steps: number;

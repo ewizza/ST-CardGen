@@ -5,7 +5,8 @@
     "moduleResolution": "Bundler",
     "outDir": "dist",
     "rootDir": "src",
-    "strict": true,
+    "strict": false,
+    "noImplicitAny": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "types": [

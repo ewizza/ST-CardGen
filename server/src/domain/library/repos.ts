@@ -20,7 +20,7 @@ function isSafeAbsolute(p: string) {
 export function getLibraryRepos(): { activeRepoId: string; repositories: LibraryRepo[] } {
   const cfg = loadConfig();
   const repositories = Array.isArray(cfg.library?.repositories)
-    ? (cfg.library.repositories as LibraryRepo[])
+    ? (cfg.library.repositories.filter(repo => repo.id) as LibraryRepo[])
     : [];
   const activeRepoId = cfg.library?.activeRepoId || "cardgen";
   return { activeRepoId, repositories };
@@ -28,9 +28,9 @@ export function getLibraryRepos(): { activeRepoId: string; repositories: Library
 
 export function resolveRepo(repoId?: string): LibraryRepo {
   const { activeRepoId, repositories } = getLibraryRepos();
-  const fallback = defaultConfig().library.repositories[0];
+  const fallback = defaultConfig().library.repositories[0] as LibraryRepo;
   const byId = (id?: string) => repositories.find((repo) => repo.id === id);
-  return byId(repoId) || byId(activeRepoId) || repositories[0] || fallback;
+  return byId(repoId) || byId(activeRepoId) || (repositories[0] as LibraryRepo) || fallback;
 }
 
 export function ensureRepoDir(repo: LibraryRepo) {
