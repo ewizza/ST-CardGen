@@ -87,6 +87,7 @@ jobs:
           context: .
           platforms: linux/amd64
           push: false
+          load: true
           tags: st-cardgen:test
 
       - name: Debug Show Docker images
