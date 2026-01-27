@@ -156,3 +156,41 @@ From the repo root:
 ```bash
 npm install
 npm run dev
+```
+---
+
+## Troubleshooting (common issues)
+
+### `tsx` or `vite` is not recognized
+This almost always means dependencies weren’t installed at the repo root.
+
+From the repo root:
+
+```bash
+npm install
+npm run dev
+```
+### Ports already in use (Vite 5173 / Server 3001) ###
+
+If Vite prints something like “Port 5173 is in use, trying another one…”, that’s fine — it will choose the next available port and print the final URL (e.g. http://localhost:5176/).
+
+If the server fails with EADDRINUSE :::3001, something else is already using port 3001. Either stop the other process or free the port:
+
+Windows (PowerShell):
+```ps
+netstat -ano | findstr :3001
+taskkill /PID <PID> /F
+```
+Then start again:
+```bash
+npm run dev
+```
+### “This operation was aborted” / connection aborted during long generations ###
+
+Increase these settings in Settings → Text Completion:
+
+Max Tokens
+
+Request timeout
+
+Verbose presets and longer fields will require higher values depending on your provider/model.
