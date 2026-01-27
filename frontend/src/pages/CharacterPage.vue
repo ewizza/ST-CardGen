@@ -1510,6 +1510,13 @@ pre {
   background: rgba(20, 20, 20, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.12);
   max-width: 90%;
+  color: rgba(255, 255, 255, 0.92);
+}
+.avatar-overlay-card .btn-ghost {
+  color: rgba(255, 255, 255, 0.92);
+}
+.avatar-overlay-card .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 .overlay-text {
   display: flex;

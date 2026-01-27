@@ -46,6 +46,7 @@ coverage/
 # -------------------------
 # generated images
 server/output/
+server/output/**
 # user library + indexes + local config (paths, key references, etc.)
 server/data/
 # if you want to keep non-sensitive seed data, add exceptions like:
@@ -56,3 +57,6 @@ server/data/
 # -------------------------
 .cache/
 tmp/
+
+# Optional: if you ever add logs
+server/logs/
