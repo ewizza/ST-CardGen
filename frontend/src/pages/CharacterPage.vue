@@ -1253,7 +1253,7 @@ onUnmounted(() => {
           </label>
 
             <label class="field">
-              <span class="label">Negative prompt</span>
+              <span class="label">Negative prompt (enter default in settings)</span>
               <textarea v-model="negative_prompt" rows="3" class="textarea"></textarea>
             </label>
             </CollapsiblePanel>
