@@ -192,6 +192,11 @@ export const ConfigSchema = z.object({
   ,
   generation: z.object({
     contentRating: z.enum(["sfw", "nsfw_allowed"]).default("nsfw_allowed"),
+    structuredJson: z.object({
+      enabled: z.boolean().default(true),
+      temperature: z.number().min(0).max(2).default(0.3),
+      top_p: z.number().min(0).max(1).default(0.9),
+    }).default({}),
     fieldDetail: z.object({
       profile: z.enum(["short", "detailed", "verbose"]).default("detailed"),
       overrides: z.object({

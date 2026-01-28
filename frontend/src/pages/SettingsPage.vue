@@ -88,6 +88,60 @@ const contentRating = computed({
   },
 });
 
+const structuredJsonEnabled = computed({
+  get: () => cfg.config?.generation?.structuredJson?.enabled ?? true,
+  set: (value: boolean) => {
+    if (!cfg.config) return;
+    if (!cfg.config.generation) {
+      cfg.config.generation = {
+        contentRating: "nsfw_allowed",
+        structuredJson: { enabled: value, temperature: 0.3, top_p: 0.9 },
+      };
+    } else {
+      if (!cfg.config.generation.structuredJson) {
+        cfg.config.generation.structuredJson = { enabled: value, temperature: 0.3, top_p: 0.9 };
+      }
+      cfg.config.generation.structuredJson.enabled = value;
+    }
+  },
+});
+
+const structuredJsonTemp = computed({
+  get: () => cfg.config?.generation?.structuredJson?.temperature ?? 0.3,
+  set: (value: number) => {
+    if (!cfg.config) return;
+    if (!cfg.config.generation) {
+      cfg.config.generation = {
+        contentRating: "nsfw_allowed",
+        structuredJson: { enabled: true, temperature: value, top_p: 0.9 },
+      };
+    } else {
+      if (!cfg.config.generation.structuredJson) {
+        cfg.config.generation.structuredJson = { enabled: true, temperature: value, top_p: 0.9 };
+      }
+      cfg.config.generation.structuredJson.temperature = value;
+    }
+  },
+});
+
+const structuredJsonTopP = computed({
+  get: () => cfg.config?.generation?.structuredJson?.top_p ?? 0.9,
+  set: (value: number) => {
+    if (!cfg.config) return;
+    if (!cfg.config.generation) {
+      cfg.config.generation = {
+        contentRating: "nsfw_allowed",
+        structuredJson: { enabled: true, temperature: 0.3, top_p: value },
+      };
+    } else {
+      if (!cfg.config.generation.structuredJson) {
+        cfg.config.generation.structuredJson = { enabled: true, temperature: 0.3, top_p: 0.9 };
+      }
+      cfg.config.generation.structuredJson.top_p = value;
+    }
+  },
+});
+
 const fieldDetailProfile = computed({
   get: () => cfg.config?.generation?.fieldDetail?.profile ?? "detailed",
   set: (value: FieldDetailProfile) => {
@@ -595,6 +649,24 @@ async function onSaveFieldDetail() {
             <option value="sfw">SFW only</option>
           </select>
         </label>
+        <hr class="sep" />
+        <label class="field">
+          <span>Structured JSON mode</span>
+          <div class="row">
+            <input type="checkbox" v-model="structuredJsonEnabled" />
+            <span class="muted">Improves JSON reliability for local models by using low temperature / top_p on structured endpoints.</span>
+          </div>
+        </label>
+        <div v-if="structuredJsonEnabled" class="grid">
+          <label class="field">
+            <span>Structured temperature</span>
+            <input type="number" min="0" max="2" step="0.05" v-model.number="structuredJsonTemp" />
+          </label>
+          <label class="field">
+            <span>Structured top_p</span>
+            <input type="number" min="0" max="1" step="0.05" v-model.number="structuredJsonTopP" />
+          </label>
+        </div>
         <div class="row">
           <button @click="onSaveContentRating" :disabled="savingContent">
             {{ savingContent ? "Saving..." : "Save" }}
@@ -740,6 +812,11 @@ async function onSaveFieldDetail() {
   display: grid;
   gap: 16px;
 }
+.sep {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
 .api-key {
   margin-top: 8px;
   display: grid;
@@ -802,6 +879,11 @@ async function onSaveFieldDetail() {
   align-items: center;
   margin-top: 10px;
   flex-wrap: wrap;
+}
+.grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 .grow {
   flex: 1;

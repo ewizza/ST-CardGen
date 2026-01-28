@@ -197,6 +197,16 @@ function defaultNegativePrompt(contentRating: "sfw" | "nsfw_allowed") {
   return base;
 }
 
+function structuredJsonParams(cfg: ReturnType<typeof loadConfig>) {
+  const sj = cfg.generation?.structuredJson;
+  if (!sj?.enabled) return undefined;
+  return { temperature: sj.temperature, top_p: sj.top_p };
+}
+
+function mergeParams(a?: Record<string, any>, b?: Record<string, any>) {
+  return { ...(a ?? {}), ...(b ?? {}) };
+}
+
 // POST /api/character/generate
 characterRouter.post("/generate", wrap(async (req, res) => {
   const rawLimit = 8000;
@@ -216,7 +226,8 @@ characterRouter.post("/generate", wrap(async (req, res) => {
       { contentRating, fieldDetail }
     );
 
-    raw = await generateText("", prompt);
+    const sjParams = structuredJsonParams(cfg);
+    raw = await generateText("", prompt, sjParams);
     const character = parseCharacterResponse(raw);
     if (!character.negative_prompt?.trim()) {
       character.negative_prompt = defaultNegativePrompt(contentRating);
@@ -252,7 +263,8 @@ characterRouter.post("/fill-missing", wrap(async (req, res) => {
       { fieldDetail }
     );
 
-    const raw = await generateText("", prompt);
+    const sjParams = structuredJsonParams(cfg);
+    const raw = await generateText("", prompt, sjParams);
     const parsed = tryParseJson(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", { raw: raw.slice(0, 8000) });
@@ -297,7 +309,8 @@ characterRouter.post("/image-prompt", wrap(async (req, res) => {
       contentRating,
     });
 
-    const raw = await generateText("", prompt);
+    const sjParams = structuredJsonParams(cfg);
+    const raw = await generateText("", prompt, sjParams);
     const parsed = tryParseJson(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", { raw: raw.slice(0, 8000) });
@@ -336,8 +349,10 @@ characterRouter.post("/regenerate", wrap(async (req, res) => {
 
     let lastFiltered: Record<string, any> = {};
     const maxTokens = body.maxTokens;
-    const regenParams = maxTokens ? { max_tokens: maxTokens } : undefined;
     const cfg = loadConfig();
+    const sjParams = structuredJsonParams(cfg);
+    const regenParams = maxTokens ? { max_tokens: maxTokens } : undefined;
+    const params = mergeParams(sjParams, regenParams);
     const fieldDetail = cfg.generation?.fieldDetail;
     for (let attempt = 0; attempt < 3; attempt++) {
       const prompt = buildRegeneratePrompt(
@@ -353,7 +368,7 @@ characterRouter.post("/regenerate", wrap(async (req, res) => {
         { fieldDetail }
       );
 
-      const raw = await generateText("", prompt, regenParams);
+      const raw = await generateText("", prompt, params);
       const parsed = tryParseJson(raw);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", { raw: raw.slice(0, 8000) });
