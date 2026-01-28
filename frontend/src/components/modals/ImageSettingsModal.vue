@@ -13,6 +13,18 @@ const isStability = computed(() => image.value?.provider === "stability");
 const isHuggingFace = computed(() => image.value?.provider === "huggingface");
 const isGoogle = computed(() => image.value?.provider === "google");
 const providerInfo = computed(() => cfg.config?.image.providerInfo?.[cfg.config?.image.provider]);
+const negativePrompt = computed({
+  get: () => {
+    if (!cfg.config) return { useDefault: true, defaultText: "" };
+    ensureImageDefaults();
+    return cfg.config.image.negativePrompt!;
+  },
+  set: (value) => {
+    if (!cfg.config) return;
+    ensureImageDefaults();
+    cfg.config.image.negativePrompt = value;
+  },
+});
 const workflows = ref<Array<{ name: string; title: string; hasLora: boolean }>>([]);
 const selectedWorkflow = computed(() =>
   workflows.value.find((w) => w.name === cfg.config?.image.comfyui.workflow)
@@ -77,9 +89,13 @@ function ensureImageDefaults() {
   cfg.config.image.stability ??= {} as any;
   cfg.config.image.huggingface ??= {} as any;
   cfg.config.image.google ??= {} as any;
+  cfg.config.image.negativePrompt ??= {} as any;
 
   cfg.config.image.google!.imagen ??= {} as any;
   cfg.config.image.google!.nano ??= {} as any;
+
+  cfg.config.image.negativePrompt!.useDefault ??= true;
+  cfg.config.image.negativePrompt!.defaultText ??= "";
 }
 
 async function save() {
@@ -551,6 +567,34 @@ onMounted(() => {
         </label>
       </div>
     </div>
+
+    <details class="card2">
+      <summary><h3 style="display:inline">Negative Prompt</h3></summary>
+
+      <label class="field">
+        <span>Use default negative prompt</span>
+        <input type="checkbox" v-model="negativePrompt.useDefault" />
+        <small class="muted">
+          When enabled, the app will not ask the LLM to generate negative_prompt; it will use the saved default below.
+        </small>
+      </label>
+
+      <label class="field">
+        <span>Default negative prompt</span>
+        <textarea
+          v-model="negativePrompt.defaultText"
+          rows="4"
+          placeholder="lowres, blurry, jpeg artifacts, bad anatomy, extra limbs, ..."
+        />
+        <small class="muted">
+          Leave blank to use the built-in default (and content rating will add SFW exclusions automatically).
+        </small>
+      </label>
+
+      <div class="row">
+        <button @click="save">Save</button>
+      </div>
+    </details>
 
     <div v-if="isStability && cfg.config?.image?.stability" class="card2">
       <h3>Stability</h3>

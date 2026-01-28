@@ -17,7 +17,11 @@ export type CharacterGenInput = {
 
 export function buildCharacterGenPrompt(
   input: CharacterGenInput,
-  options: { contentRating: "sfw" | "nsfw_allowed"; fieldDetail?: FieldDetailSettings }
+  options: {
+    contentRating: "sfw" | "nsfw_allowed";
+    fieldDetail?: FieldDetailSettings;
+    useDefaultNegativePrompt?: boolean;
+  }
 ) {
   const nameLine = input.name?.trim()
     ? `Preferred name: ${input.name.trim()}`
@@ -26,6 +30,11 @@ export function buildCharacterGenPrompt(
     ? `Lorebook:\n${input.lorebook.trim()}`
     : "Lorebook: (none)";
   const lang = normalizeOutputLanguage(input.outputLanguage);
+
+  const useDefaultNegativePrompt = options.useDefaultNegativePrompt === true;
+  const jsonKeys = useDefaultNegativePrompt
+    ? "name, description, personality, scenario, first_mes, mes_example, tags, creator_notes, image_prompt, pov"
+    : "name, description, personality, scenario, first_mes, mes_example, tags, creator_notes, image_prompt, negative_prompt, pov";
 
   return [
     "You are generating a SillyTavern character card.",
@@ -40,22 +49,30 @@ export function buildCharacterGenPrompt(
       "",
     ] : []),
     "- Output must be a single JSON object with keys exactly:",
-    "  name, description, personality, scenario, first_mes, mes_example, tags, creator_notes, image_prompt, negative_prompt, pov",
+    `  ${jsonKeys}`,
     "- Use standard JSON escaping for newlines (\\n). No trailing commas.",
     "- tags must be an array of short strings.",
     "- image_prompt must be a concise, detailed portrait prompt for the avatar.",
-    "- negative_prompt should list what to avoid.",
     "- image_prompt: English, exactly ONE paragraph, 350–500 characters max, no newlines.",
-    "- negative_prompt: English, single line, comma-separated phrases, 200–300 characters max, no newlines.",
+    ...(useDefaultNegativePrompt ? [
+      "- Do NOT output negative_prompt; the app will supply it.",
+    ] : [
+      "- negative_prompt should list what to avoid.",
+      "- negative_prompt: English, single line, comma-separated phrases, 200–300 characters max, no newlines.",
+    ]),
     "- If you exceed limits, rewrite shorter before responding.",
     "- Do not use quotes or markdown in image_prompt/negative_prompt.",
     "- mes_example must use {{user}} and {{char}} labels.",
     options.contentRating === "sfw"
       ? "Content rating: SFW only. Keep content safe and avoid sexual content."
       : "Content rating: NSFW allowed. Do not add safety constraints unless requested; focus negative_prompt on quality/artifacts.",
-    options.contentRating === "sfw"
-      ? "- negative_prompt must include nudity and explicit sexual content to avoid."
-      : "- negative_prompt should focus on quality/artifacts unless the user requests otherwise.",
+    ...(useDefaultNegativePrompt
+      ? []
+      : [
+          options.contentRating === "sfw"
+            ? "- negative_prompt must include nudity and explicit sexual content to avoid."
+            : "- negative_prompt should focus on quality/artifacts unless the user requests otherwise.",
+        ]),
     "POV rules for first_mes:",
     "- first: {{char}} speaks in first person.",
     "- second: address {{user}} in second person without controlling their actions.",
@@ -95,7 +112,7 @@ export function buildCharacterGenPrompt(
     "#TAGS#",
     "#CREATOR_NOTES#",
     "#IMAGE_PROMPT#",
-    "#NEGATIVE_PROMPT#",
+    ...(useDefaultNegativePrompt ? [] : ["#NEGATIVE_PROMPT#"]),
     "#POV#",
     "",
     "Input:",
@@ -182,31 +199,43 @@ type ImagePromptInput = {
   styleHints?: string;
 };
 
-export function buildImagePrompt(input: ImagePromptInput & { contentRating: "sfw" | "nsfw_allowed" }) {
+export function buildImagePrompt(
+  input: ImagePromptInput & {
+    contentRating: "sfw" | "nsfw_allowed";
+    useDefaultNegativePrompt?: boolean;
+  }
+) {
   const fields = JSON.stringify(input.card, null, 2);
   const styleLine = input.styleHints?.trim()
     ? `Style hints: ${input.styleHints.trim()}`
     : "Style hints: (none)";
+  const useDefaultNegativePrompt = input.useDefaultNegativePrompt === true;
 
   return [
     "You are generating an avatar portrait prompt for a SillyTavern character.",
-    "Return ONLY valid JSON with keys: image_prompt, negative_prompt.",
+    useDefaultNegativePrompt
+      ? "Return ONLY valid JSON with keys: image_prompt."
+      : "Return ONLY valid JSON with keys: image_prompt, negative_prompt.",
     "Rules:",
     "- image_prompt must be a concise, detailed portrait prompt.",
-    "- negative_prompt should list what to avoid.",
-    "- image_prompt: English, exactly ONE paragraph, 350–500 characters max, no newlines.",
-    "- negative_prompt: English, single line, comma-separated phrases, 200–300 characters max, no newlines.",
+    ...(useDefaultNegativePrompt ? [] : ["- negative_prompt should list what to avoid."]),
+    "- image_prompt: English, exactly ONE paragraph, 350-500 characters max, no newlines.",
+    ...(useDefaultNegativePrompt ? [] : [
+      "- negative_prompt: English, single line, comma-separated phrases, 200-300 characters max, no newlines.",
+    ]),
     "- If you exceed limits, rewrite shorter before responding.",
     "- Do not use quotes or markdown in image_prompt/negative_prompt.",
     input.contentRating === "sfw"
-      ? "Content rating: SFW only. Include nudity and explicit sexual content in negative_prompt."
+      ? (useDefaultNegativePrompt
+        ? "Content rating: SFW only. Keep content safe and avoid sexual content."
+        : "Content rating: SFW only. Include nudity and explicit sexual content in negative_prompt.")
       : "Content rating: NSFW allowed. Do not add safety constraints unless requested; focus negative_prompt on quality/artifacts.",
     "- Use standard JSON escaping for newlines (\\n). No trailing commas.",
     "",
     "Character fields:",
     fields,
     styleLine,
-  ].join("\n");
+  ].join("\\n");
 }
 
 type RegenerateInput = {

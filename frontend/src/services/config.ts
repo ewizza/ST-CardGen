@@ -78,6 +78,10 @@ export type AppConfig = {
         imageSize?: "1K" | "2K" | "4K";
       };
     };
+    negativePrompt?: {
+      useDefault: boolean;
+      defaultText: string;
+    };
     comfyui: {
       apiKeyRef?: string;
       model?: string;

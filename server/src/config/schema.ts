@@ -60,6 +60,10 @@ export const ConfigSchema = z.object({
 
     sampler: z.string().optional(),
     scheduler: z.string().optional(),
+    negativePrompt: z.object({
+      useDefault: z.boolean().default(true),
+      defaultText: z.string().default(""),
+    }).default({}),
 
     providerInfo: z.object({
       sdapi: z.object({

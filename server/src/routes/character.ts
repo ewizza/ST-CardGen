@@ -200,6 +200,11 @@ function defaultNegativePrompt(contentRating: "sfw" | "nsfw_allowed") {
   return base;
 }
 
+function effectiveNegativePrompt(cfg: ReturnType<typeof loadConfig>, contentRating: "sfw" | "nsfw_allowed") {
+  const configured = cfg.image?.negativePrompt?.defaultText?.trim();
+  return configured && configured.length ? configured : defaultNegativePrompt(contentRating);
+}
+
 // POST /api/character/generate
 characterRouter.post("/generate", wrap(async (req, res) => {
   const rawLimit = 8000;
@@ -208,6 +213,8 @@ characterRouter.post("/generate", wrap(async (req, res) => {
     const body = GenerateSchema.parse(req.body);
     const cfg = loadConfig();
     const contentRating = cfg.generation?.contentRating ?? "nsfw_allowed";
+    const useDefaultNeg = cfg.image?.negativePrompt?.useDefault !== false;
+    const neg = effectiveNegativePrompt(cfg, contentRating);
     const fieldDetail = cfg.generation?.fieldDetail;
     const prompt = buildCharacterGenPrompt(
       {
@@ -217,13 +224,15 @@ characterRouter.post("/generate", wrap(async (req, res) => {
         lorebook: body.lorebook,
         outputLanguage: body.outputLanguage,
       },
-      { contentRating, fieldDetail }
+      { contentRating, fieldDetail, useDefaultNegativePrompt: useDefaultNeg }
     );
 
     raw = await generateText("", prompt);
     const character = parseCharacterResponse(raw);
-    if (!character.negative_prompt?.trim()) {
-      character.negative_prompt = defaultNegativePrompt(contentRating);
+    if (useDefaultNeg) {
+      character.negative_prompt = neg;
+    } else if (!character.negative_prompt?.trim()) {
+      character.negative_prompt = neg;
     }
     return ok(res, { character });
   } catch (e: any) {
@@ -296,10 +305,13 @@ characterRouter.post("/image-prompt", wrap(async (req, res) => {
 
     const cfg = loadConfig();
     const contentRating = cfg.generation?.contentRating ?? "nsfw_allowed";
+    const useDefaultNeg = cfg.image?.negativePrompt?.useDefault !== false;
+    const neg = effectiveNegativePrompt(cfg, contentRating);
     const prompt = buildImagePrompt({
       card: body.card,
       styleHints: body.styleHints,
       contentRating,
+      useDefaultNegativePrompt: useDefaultNeg,
     });
 
     const raw = await generateText("", prompt);
@@ -317,8 +329,10 @@ characterRouter.post("/image-prompt", wrap(async (req, res) => {
     }
 
     const payload = validated.data;
-    if (!payload.negative_prompt?.trim()) {
-      payload.negative_prompt = defaultNegativePrompt(contentRating);
+    if (useDefaultNeg) {
+      payload.negative_prompt = neg;
+    } else if (!payload.negative_prompt?.trim()) {
+      payload.negative_prompt = neg;
     }
     return ok(res, { ...payload });
   } catch (e: any) {
@@ -331,18 +345,28 @@ characterRouter.post("/image-prompt", wrap(async (req, res) => {
 characterRouter.post("/regenerate", wrap(async (req, res) => {
   try {
     const body = RegenerateSchema.parse(req.body);
+    const cfg = loadConfig();
+    const contentRating = cfg.generation?.contentRating ?? "nsfw_allowed";
+    const useDefaultNeg = cfg.image?.negativePrompt?.useDefault !== false;
+    const neg = effectiveNegativePrompt(cfg, contentRating);
     const targets = Object.entries(body.keep)
       .filter(([, keep]) => !keep)
       .map(([key]) => key);
+    const wantsNegativePrompt = useDefaultNeg && targets.includes("negative_prompt");
+    const filteredTargets = useDefaultNeg
+      ? targets.filter((key) => key !== "negative_prompt")
+      : targets;
 
-    if (!targets.length) {
+    if (!filteredTargets.length) {
+      if (wantsNegativePrompt) {
+        return ok(res, { patch: { negative_prompt: neg } });
+      }
       return ok(res, { patch: {} });
     }
 
     let lastFiltered: Record<string, any> = {};
     const maxTokens = body.maxTokens;
     const regenParams = maxTokens ? { max_tokens: maxTokens } : undefined;
-    const cfg = loadConfig();
     const fieldDetail = cfg.generation?.fieldDetail;
     for (let attempt = 0; attempt < 3; attempt++) {
       const prompt = buildRegeneratePrompt(
@@ -352,7 +376,7 @@ characterRouter.post("/regenerate", wrap(async (req, res) => {
           pov: body.pov,
           lorebook: body.lorebook,
           card: body.card,
-          targets,
+          targets: filteredTargets,
           regenNonce: makeNonce(),
           outputLanguage: body.outputLanguage,
         },
@@ -373,9 +397,9 @@ characterRouter.post("/regenerate", wrap(async (req, res) => {
         });
       }
 
-      const filtered = filterPatchToTargets(validated.data, targets);
+      const filtered = filterPatchToTargets(validated.data, filteredTargets);
       lastFiltered = filtered;
-      const anyDifferent = targets.some((key) => {
+      const anyDifferent = filteredTargets.some((key) => {
         const existingValue = (body.card as Record<string, any>)[key];
         const regenerated = filtered[key];
         if (existingValue === undefined || existingValue === null) {
@@ -385,10 +409,16 @@ characterRouter.post("/regenerate", wrap(async (req, res) => {
       });
 
       if (anyDifferent) {
+        if (wantsNegativePrompt) {
+          filtered.negative_prompt = neg;
+        }
         return ok(res, { patch: filtered });
       }
     }
 
+    if (wantsNegativePrompt) {
+      lastFiltered.negative_prompt = neg;
+    }
     return ok(res, { patch: lastFiltered });
   } catch (e: any) {
     if (e instanceof z.ZodError) throw e;
