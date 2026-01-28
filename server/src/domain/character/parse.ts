@@ -17,20 +17,58 @@ const TAGS = [
 const TAG_SET = new Set(TAGS);
 
 export function extractJsonBlock(raw: string): string | null {
-  const match = raw.match(/```json\s*([\s\S]*?)```/i);
-  return match ? match[1].trim() : null;
+  const jsonMatch = raw.match(/```json\s*([\s\S]*?)```/i);
+  if (jsonMatch) return jsonMatch[1].trim();
+  const genericMatch = raw.match(/```\s*([\s\S]*?)```/);
+  return genericMatch ? genericMatch[1].trim() : null;
+}
+
+export function extractFirstBalancedJsonObject(raw: string): string | null {
+  const start = raw.indexOf("{");
+  if (start === -1) return null;
+
+  let inString = false;
+  let escape = false;
+  let depth = 0;
+
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      escape = true;
+      continue;
+    }
+    if (ch === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (ch === "{") depth++;
+      if (ch === "}") {
+        depth--;
+        if (depth === 0) return raw.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
 }
 
 export function tryParseJson(raw: string): any | null {
   const candidates: string[] = [];
   const block = extractJsonBlock(raw);
   if (block) candidates.push(block);
+  const balanced = extractFirstBalancedJsonObject(raw);
+  if (balanced) candidates.push(balanced);
   candidates.push(raw.trim());
 
   for (const candidate of candidates) {
-    if (!candidate) continue;
+    const trimmed = candidate.replace(/^\uFEFF/, "").trim();
+    if (!trimmed) continue;
     try {
-      return JSON.parse(candidate);
+      return JSON.parse(trimmed);
     } catch {
       // try next candidate
     }
