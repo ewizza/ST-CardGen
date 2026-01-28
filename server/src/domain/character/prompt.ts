@@ -1,10 +1,18 @@
 import { buildFieldDetailLines, type FieldDetailSettings, type FieldKey } from "./fieldDetail.js";
 
+function normalizeOutputLanguage(lang?: string): string | null {
+  const value = (lang ?? "").trim();
+  if (!value) return null;
+  if (value.toLowerCase() === "auto") return null;
+  return value;
+}
+
 export type CharacterGenInput = {
   idea: string;
   name?: string;
   pov: "first" | "second" | "third";
   lorebook?: string;
+  outputLanguage?: string;
 };
 
 export function buildCharacterGenPrompt(
@@ -17,11 +25,20 @@ export function buildCharacterGenPrompt(
   const loreLine = input.lorebook?.trim()
     ? `Lorebook:\n${input.lorebook.trim()}`
     : "Lorebook: (none)";
+  const lang = normalizeOutputLanguage(input.outputLanguage);
 
   return [
     "You are generating a SillyTavern character card.",
     "Return ONLY valid JSON. No markdown, no commentary.",
     "Rules:",
+    ...(lang ? [
+      "LANGUAGE REQUIREMENT (CRITICAL):",
+      `- Write ALL field values in ${lang} (do not mix languages).`,
+      "- Keep proper names as names, but everything else must be in the selected language.",
+      "- Avoid English filler words (e.g., 'but', 'and', 'so') in non-English text.",
+      "- Always write image_prompt and negative_prompt in English.",
+      "",
+    ] : []),
     "- Output must be a single JSON object with keys exactly:",
     "  name, description, personality, scenario, first_mes, mes_example, tags, creator_notes, image_prompt, negative_prompt, pov",
     "- Use standard JSON escaping for newlines (\\n). No trailing commas.",
@@ -91,6 +108,7 @@ type FillMissingInput = {
   pov: "first" | "second" | "third";
   idea?: string;
   lorebook?: string;
+  outputLanguage?: string;
 };
 
 export function buildFillMissingPrompt(input: FillMissingInput, options?: { fieldDetail?: FieldDetailSettings }) {
@@ -103,11 +121,20 @@ export function buildFillMissingPrompt(input: FillMissingInput, options?: { fiel
     ["description", "personality", "scenario", "first_mes", "mes_example", "creator_notes", "tags"].includes(k)
   ) as FieldKey[];
   const needsFirstMes = missingFieldKeys.includes("first_mes");
+  const lang = normalizeOutputLanguage(input.outputLanguage);
 
   return [
     "You are completing missing fields for a SillyTavern character card.",
     "Return ONLY valid JSON. No markdown, no commentary.",
     "Rules:",
+    ...(lang ? [
+      "LANGUAGE REQUIREMENT (CRITICAL):",
+      `- Write ALL field values in ${lang} (do not mix languages).`,
+      "- Keep proper names as names, but everything else must be in the selected language.",
+      "- Avoid English filler words (e.g., 'but', 'and', 'so') in non-English text.",
+      "- Always write image_prompt and negative_prompt in English.",
+      "",
+    ] : []),
     "- Output must be a JSON object containing ONLY the missing keys listed below.",
     "- Do NOT include keys that already have content.",
     "- Use standard JSON escaping for newlines (\\n). No trailing commas.",
@@ -182,6 +209,7 @@ type RegenerateInput = {
   card: Record<string, any>;
   targets: string[];
   regenNonce?: string;
+  outputLanguage?: string;
 };
 
 export function buildRegeneratePrompt(input: RegenerateInput, options?: { fieldDetail?: FieldDetailSettings }) {
@@ -198,11 +226,20 @@ export function buildRegeneratePrompt(input: RegenerateInput, options?: { fieldD
     ["description", "personality", "scenario", "first_mes", "mes_example", "creator_notes", "tags"].includes(k)
   ) as FieldKey[];
   const needsFirstMes = targetFieldKeys.includes("first_mes");
+  const lang = normalizeOutputLanguage(input.outputLanguage);
 
   return [
     "You are regenerating selected fields for a SillyTavern character card.",
     "Return ONLY valid JSON. No markdown, no commentary.",
     "Rules:",
+    ...(lang ? [
+      "LANGUAGE REQUIREMENT (CRITICAL):",
+      `- Write ALL field values in ${lang} (do not mix languages).`,
+      "- Keep proper names as names, but everything else must be in the selected language.",
+      "- Avoid English filler words (e.g., 'but', 'and', 'so') in non-English text.",
+      "- Always write image_prompt and negative_prompt in English.",
+      "",
+    ] : []),
     "- Output must be a JSON object containing ONLY the target keys listed below.",
     "- Do NOT include keys that are not in the target list.",
     "- Use standard JSON escaping for newlines (\\n). No trailing commas.",

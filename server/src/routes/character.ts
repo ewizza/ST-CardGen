@@ -15,6 +15,7 @@ const GenerateSchema = z.object({
   name: z.string().optional(),
   pov: z.enum(["first", "second", "third"]).default("third"),
   lorebook: z.string().optional(),
+  outputLanguage: z.string().optional(),
 });
 
 const FillMissingSchema = z.object({
@@ -34,6 +35,7 @@ const FillMissingSchema = z.object({
   lorebook: z.string().optional(),
   idea: z.string().optional(),
   pov: z.enum(["first", "second", "third"]).default("third"),
+  outputLanguage: z.string().optional(),
 });
 
 const PatchSchema = z.object({
@@ -71,6 +73,7 @@ const RegenerateSchema = z.object({
   requestedName: z.string().optional(),
   pov: z.enum(["first", "second", "third"]).default("third"),
   lorebook: z.string().optional(),
+  outputLanguage: z.string().optional(),
   maxTokens: z.number().int().min(32).max(4096).optional(),
   card: z.object({
     name: z.string().optional(),
@@ -212,6 +215,7 @@ characterRouter.post("/generate", wrap(async (req, res) => {
         name: body.name,
         pov: body.pov,
         lorebook: body.lorebook,
+        outputLanguage: body.outputLanguage,
       },
       { contentRating, fieldDetail }
     );
@@ -248,6 +252,7 @@ characterRouter.post("/fill-missing", wrap(async (req, res) => {
         pov: body.pov,
         idea: body.idea,
         lorebook: body.lorebook,
+        outputLanguage: body.outputLanguage,
       },
       { fieldDetail }
     );
@@ -349,6 +354,7 @@ characterRouter.post("/regenerate", wrap(async (req, res) => {
           card: body.card,
           targets,
           regenNonce: makeNonce(),
+          outputLanguage: body.outputLanguage,
         },
         { fieldDetail }
       );

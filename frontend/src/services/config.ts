@@ -98,6 +98,7 @@ export type AppConfig = {
   };
   generation: {
     contentRating: "sfw" | "nsfw_allowed";
+    structuredJson?: { enabled: boolean; temperature: number; top_p: number };
     fieldDetail?: {
       profile: FieldDetailProfile;
       overrides: Partial<Record<FieldKey, FieldOverrideMode>>;

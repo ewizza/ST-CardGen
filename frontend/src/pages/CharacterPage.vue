@@ -20,7 +20,25 @@ const {
   name: ideaName,
   pov,
   lorebook,
+  outputLanguage,
 } = storeToRefs(workspaceStore);
+
+const COMMON_LANGUAGES = [
+  "auto",
+  "English",
+  "Spanish",
+  "French",
+  "German",
+  "Italian",
+  "Portuguese",
+  "Dutch",
+  "Russian",
+  "Japanese",
+  "Korean",
+  "Chinese (Simplified)",
+  "Chinese (Traditional)",
+  "Arabic",
+];
 
 const characterStore = useCharacterStore();
 const {
@@ -118,6 +136,9 @@ async function onGenerate() {
       name: ideaName.value.trim() || undefined,
       pov: pov.value,
       lorebook: lorebook.value.trim() || undefined,
+      outputLanguage: (outputLanguage.value && outputLanguage.value.toLowerCase() !== "auto")
+        ? outputLanguage.value
+        : undefined,
     });
 
     if (!res.ok) {
@@ -241,6 +262,9 @@ async function runRegenerate(keep: RegenKeep, keepAvatar: boolean, requestedName
       requestedName,
       pov: pov.value,
       lorebook: lorebook.value.trim() || undefined,
+      outputLanguage: (outputLanguage.value && outputLanguage.value.toLowerCase() !== "auto")
+        ? outputLanguage.value
+        : undefined,
       card: buildCardPayload(),
       maxTokens,
       keep,
@@ -417,6 +441,9 @@ async function onFillMissing() {
       idea: idea.value.trim() || undefined,
       lorebook: lorebook.value.trim() || undefined,
       pov: pov.value,
+      outputLanguage: (outputLanguage.value && outputLanguage.value.toLowerCase() !== "auto")
+        ? outputLanguage.value
+        : undefined,
     });
 
     if (!res.ok) {
@@ -935,6 +962,15 @@ onUnmounted(() => {
                   <option value="second">Second person</option>
                   <option value="third">Third person</option>
                 </select>
+              </label>
+
+              <label class="field">
+                <span class="label">Language</span>
+                <input v-model="outputLanguage" list="ccg-lang-options" class="input" placeholder="auto" />
+                <datalist id="ccg-lang-options">
+                  <option v-for="lang in COMMON_LANGUAGES" :key="lang" :value="lang"></option>
+                </datalist>
+                <span class="help">Controls the language for generated text fields. Use <code>auto</code> for model default.</span>
               </label>
             </div>
 

@@ -5,6 +5,7 @@ export type CharacterGenerateRequest = {
   name?: string;
   pov?: "first" | "second" | "third";
   lorebook?: string;
+  outputLanguage?: string;
 };
 
 export type CharacterPayload = {
@@ -41,6 +42,7 @@ export type FillMissingRequest = {
   lorebook?: string;
   idea?: string;
   pov?: "first" | "second" | "third";
+  outputLanguage?: string;
 };
 
 export type FillMissingResponse = {
@@ -91,6 +93,7 @@ export type RegenerateRequest = {
   requestedName?: string;
   pov: "first" | "second" | "third";
   lorebook?: string;
+  outputLanguage?: string;
   card: CharacterPayload;
   maxTokens?: number;
   keep: {

@@ -9,6 +9,7 @@ type WorkspaceState = {
   name: string;
   pov: WorkspacePov;
   lorebook: string;
+  outputLanguage: string; // "auto" or a human language name
 };
 
 const defaultState: WorkspaceState = {
@@ -16,6 +17,7 @@ const defaultState: WorkspaceState = {
   name: "",
   pov: "third",
   lorebook: "",
+  outputLanguage: "auto",
 };
 
 export const useWorkspaceStore = defineStore("workspace", () => {
@@ -23,24 +25,42 @@ export const useWorkspaceStore = defineStore("workspace", () => {
 
   const idea = computed({
     get: () => state.value.idea,
-    set: (value: string) => { state.value.idea = value; },
+    set: (value: string) => {
+      state.value.idea = value;
+    },
   });
+
   const name = computed({
     get: () => state.value.name,
-    set: (value: string) => { state.value.name = value; },
+    set: (value: string) => {
+      state.value.name = value;
+    },
   });
+
   const pov = computed({
     get: () => state.value.pov,
-    set: (value: WorkspacePov) => { state.value.pov = value; },
+    set: (value: WorkspacePov) => {
+      state.value.pov = value;
+    },
   });
+
   const lorebook = computed({
     get: () => state.value.lorebook,
-    set: (value: string) => { state.value.lorebook = value; },
+    set: (value: string) => {
+      state.value.lorebook = value;
+    },
+  });
+
+  const outputLanguage = computed({
+    get: () => state.value.outputLanguage,
+    set: (value: string) => {
+      state.value.outputLanguage = value;
+    },
   });
 
   function resetInputs() {
     state.value = { ...defaultState };
   }
 
-  return { idea, name, pov, lorebook, resetInputs };
+  return { idea, name, pov, lorebook, outputLanguage, resetInputs };
 });
