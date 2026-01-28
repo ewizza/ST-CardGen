@@ -45,6 +45,10 @@ export function buildCharacterGenPrompt(
     "- tags must be an array of short strings.",
     "- image_prompt must be a concise, detailed portrait prompt for the avatar.",
     "- negative_prompt should list what to avoid.",
+    "- image_prompt: English, exactly ONE paragraph, 350–500 characters max, no newlines.",
+    "- negative_prompt: English, single line, comma-separated phrases, 200–300 characters max, no newlines.",
+    "- If you exceed limits, rewrite shorter before responding.",
+    "- Do not use quotes or markdown in image_prompt/negative_prompt.",
     "- mes_example must use {{user}} and {{char}} labels.",
     options.contentRating === "sfw"
       ? "Content rating: SFW only. Keep content safe and avoid sexual content."
@@ -190,6 +194,10 @@ export function buildImagePrompt(input: ImagePromptInput & { contentRating: "sfw
     "Rules:",
     "- image_prompt must be a concise, detailed portrait prompt.",
     "- negative_prompt should list what to avoid.",
+    "- image_prompt: English, exactly ONE paragraph, 350–500 characters max, no newlines.",
+    "- negative_prompt: English, single line, comma-separated phrases, 200–300 characters max, no newlines.",
+    "- If you exceed limits, rewrite shorter before responding.",
+    "- Do not use quotes or markdown in image_prompt/negative_prompt.",
     input.contentRating === "sfw"
       ? "Content rating: SFW only. Include nudity and explicit sexual content in negative_prompt."
       : "Content rating: NSFW allowed. Do not add safety constraints unless requested; focus negative_prompt on quality/artifacts.",
