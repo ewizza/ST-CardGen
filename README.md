@@ -11,11 +11,11 @@ Built with:
 - **Vue 3 + Vite + TypeScript** frontend
 - **Node + Express + TypeScript** backend
 - Provider system for **Text Completion** + **Image Generation**
-- Secure **API key store** (secrets are *not* written to config files)
+- API key storage via OS keychain when available; falls back to local config.local.json (git-ignored)
 
 ---
 
-## Recent updates (last 2 days)
+## Highlights ##
 
 -  **Stable Diffusion API (SDAPI)** image provider added (Automatic1111-style endpoints) 
 -  **ComfyUI progress + cancel** during image generation (UI shows in-progress state and lets you stop jobs)
@@ -26,6 +26,7 @@ Built with:
   - Delete in-place (if repo is writable)
 -  **Library UX**: search + sort + debounced search
 -  **Settings UX**: numeric inputs fixed (Max Tokens / Request Timeout no longer fight while typing) 
+- **Language selection** for field generation (generate character fields in your chosen language)
 
 ---
 
@@ -37,6 +38,7 @@ Built with:
 - Fill missing fields after import (generate only what's empty)
 - Per-field regeneration (regenerate only what you want)
 - **Field Detail presets** (Short/Detailed/Verbose) + optional per-field overrides
+- Language selection for generation (optional)
 
 ### Image generation
 - Generate an avatar image from an image prompt (or create one from fields)
