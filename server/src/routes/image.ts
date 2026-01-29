@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { loadConfig, saveConfig } from "../config/store.js";
+import { getApiKeyFromConfig as getApiKeyFromConfigValue, loadConfig, saveConfig } from "../config/store.js";
 import { getComfyBaseUrl, getObjectInfo } from "../adapters/comfyui/client.js";
 import { applyBindings, roundTo64, type BindingsMap } from "../adapters/comfyui/bindings.js";
 import { extractSamplers, extractSchedulers } from "../adapters/comfyui/parse.js";
@@ -10,7 +10,7 @@ import { createComfyJob, updateJob } from "../domain/jobs/imageJobs.js";
 import { stabilityGenerate } from "../providers/stability.js";
 import { huggingfaceTextToImage } from "../providers/huggingface.js";
 import { generateGoogleImage } from "../providers/google.js";
-import { getKey } from "../services/keyStore.js";
+import { readApiKey } from "../secrets/secretStore.js";
 import { httpGetJson, httpPostJson, isHttpRequestError } from "../utils/http.js";
 import { fail, ok, wrap } from "../lib/api.js";
 import { mapHttpRequestError, mapUnknownError } from "../lib/errorMap.js";
@@ -272,13 +272,17 @@ imageRouter.post("/connect", wrap(async (req, res) => {
   }
 
   if (provider === "huggingface") {
-    const apiKeyRef = cfg.image.huggingface?.apiKeyRef;
-    if (!apiKeyRef) {
-      return failWith(400, "VALIDATION_ERROR", "No Hugging Face API key selected.");
-    }
-    const apiKey = await getKey(apiKeyRef);
+    const apiKeyRef = cfg.image.huggingface?.apiKeyRef ?? "";
+    const apiKeyResult = await readApiKey({
+      envVar: "HUGGINGFACE_API_KEY",
+      service: "ccg-character-generator",
+      account: apiKeyRef,
+      readFromConfig: () => (apiKeyRef ? getApiKeyFromConfigValue(apiKeyRef) : null),
+    });
+    const apiKey = apiKeyResult.value;
     if (!apiKey) {
-      return failWith(404, "NOT_FOUND", "Selected API key not found.");
+      if (apiKeyRef) return failWith(404, "NOT_FOUND", "Selected API key not found.");
+      return failWith(400, "VALIDATION_ERROR", "No Hugging Face API key configured.");
     }
     try {
       details = await httpGetJson("https://huggingface.co/api/whoami-v2", {
@@ -299,13 +303,17 @@ imageRouter.post("/connect", wrap(async (req, res) => {
   }
 
   if (provider === "google") {
-    const apiKeyRef = cfg.image.google?.apiKeyRef;
-    if (!apiKeyRef) {
-      return failWith(400, "VALIDATION_ERROR", "No API key selected.");
-    }
-    const apiKey = await getKey(apiKeyRef);
+    const apiKeyRef = cfg.image.google?.apiKeyRef ?? "";
+    const apiKeyResult = await readApiKey({
+      envVar: "GOOGLE_API_KEY",
+      service: "ccg-character-generator",
+      account: apiKeyRef,
+      readFromConfig: () => (apiKeyRef ? getApiKeyFromConfigValue(apiKeyRef) : null),
+    });
+    const apiKey = apiKeyResult.value;
     if (!apiKey) {
-      return failWith(404, "NOT_FOUND", "Selected API key not found.");
+      if (apiKeyRef) return failWith(404, "NOT_FOUND", "Selected API key not found.");
+      return failWith(400, "VALIDATION_ERROR", "No API key configured.");
     }
     okFlag = true;
     warning = "Google provider does not expose samplers/schedulers.";
@@ -357,13 +365,17 @@ imageRouter.post("/generate", wrap(async (req, res) => {
       if (!cfgGoogle) {
         return fail(res, 400, "VALIDATION_ERROR", "Google configuration not found.");
       }
-      const apiKeyRef = cfgGoogle?.apiKeyRef;
-      if (!apiKeyRef) {
-        return fail(res, 400, "VALIDATION_ERROR", "No API key selected.");
-      }
-      const apiKey = await getKey(apiKeyRef);
+      const apiKeyRef = cfgGoogle?.apiKeyRef ?? "";
+      const apiKeyResult = await readApiKey({
+        envVar: "GOOGLE_API_KEY",
+        service: "ccg-character-generator",
+        account: apiKeyRef,
+        readFromConfig: () => (apiKeyRef ? getApiKeyFromConfigValue(apiKeyRef) : null),
+      });
+      const apiKey = apiKeyResult.value;
       if (!apiKey) {
-        return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
+        if (apiKeyRef) return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
+        return fail(res, 400, "VALIDATION_ERROR", "No API key configured.");
       }
       try {
         const { buffer } = await generateGoogleImage({
@@ -385,13 +397,17 @@ imageRouter.post("/generate", wrap(async (req, res) => {
     }
 
     if (provider === "huggingface") {
-      const apiKeyRef = cfg.image.huggingface?.apiKeyRef;
-      if (!apiKeyRef) {
-        return fail(res, 400, "VALIDATION_ERROR", "No Hugging Face API key selected.");
-      }
-      const apiKey = await getKey(apiKeyRef);
+      const apiKeyRef = cfg.image.huggingface?.apiKeyRef ?? "";
+      const apiKeyResult = await readApiKey({
+        envVar: "HUGGINGFACE_API_KEY",
+        service: "ccg-character-generator",
+        account: apiKeyRef,
+        readFromConfig: () => (apiKeyRef ? getApiKeyFromConfigValue(apiKeyRef) : null),
+      });
+      const apiKey = apiKeyResult.value;
       if (!apiKey) {
-        return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
+        if (apiKeyRef) return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
+        return fail(res, 400, "VALIDATION_ERROR", "No Hugging Face API key configured.");
       }
       const model = cfg.image.huggingface?.model || "black-forest-labs/FLUX.1-schnell";
       const hfProvider = cfg.image.huggingface?.provider || "hf-inference";
@@ -423,13 +439,17 @@ imageRouter.post("/generate", wrap(async (req, res) => {
     }
 
     if (provider === "stability") {
-      const apiKeyRef = cfg.image.stability?.apiKeyRef;
-      if (!apiKeyRef) {
-        return fail(res, 400, "VALIDATION_ERROR", "No API key selected for Stability.");
-      }
-      const apiKey = await getKey(apiKeyRef);
+      const apiKeyRef = cfg.image.stability?.apiKeyRef ?? "";
+      const apiKeyResult = await readApiKey({
+        envVar: "STABILITY_API_KEY",
+        service: "ccg-character-generator",
+        account: apiKeyRef,
+        readFromConfig: () => (apiKeyRef ? getApiKeyFromConfigValue(apiKeyRef) : null),
+      });
+      const apiKey = apiKeyResult.value;
       if (!apiKey) {
-        return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
+        if (apiKeyRef) return fail(res, 404, "NOT_FOUND", "Selected API key not found.");
+        return fail(res, 400, "VALIDATION_ERROR", "No API key configured for Stability.");
       }
       try {
         const result = await stabilityGenerate({

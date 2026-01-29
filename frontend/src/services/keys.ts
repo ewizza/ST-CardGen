@@ -9,6 +9,8 @@ export type KeyListResponse = {
 export type KeySaveResponse = {
   ok: boolean;
   name?: string;
+  storedIn?: "keytar" | "config";
+  warning?: string;
   error?: string;
 };
 
@@ -26,10 +28,10 @@ export function listKeys() {
   return httpJson<KeyListResponse>("/api/keys");
 }
 
-export function saveKey(name: string, key: string) {
+export function saveKey(name: string, apiKey: string, storeSecurely: boolean) {
   return httpJson<KeySaveResponse>("/api/keys", {
     method: "POST",
-    body: JSON.stringify({ name, key }),
+    body: JSON.stringify({ name, apiKey, storeSecurely }),
   });
 }
 

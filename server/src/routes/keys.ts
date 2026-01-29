@@ -17,9 +17,10 @@ keysRouter.get("/", wrap(async (req, res) => {
 keysRouter.post("/", wrap(async (req, res) => {
   try {
     const name = String(req.body?.name ?? "");
-    const key = String(req.body?.key ?? "");
-    const saved = await saveKey(name, key);
-    return ok(res, { name: saved.name });
+    const apiKey = String(req.body?.apiKey ?? "");
+    const storeSecurely = Boolean(req.body?.storeSecurely);
+    const saved = await saveKey(name, apiKey, storeSecurely);
+    return ok(res, { name: saved.name, storedIn: saved.storedIn, warning: saved.warning });
   } catch (e: any) {
     const message = String(e?.message ?? e);
     return fail(res, 400, "VALIDATION_ERROR", message);

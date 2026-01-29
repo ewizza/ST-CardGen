@@ -1,10 +1,27 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ConfigSchema, defaultConfig, type AppConfig } from "./schema.js";
-import { saveKey } from "../services/keyStore.js";
+import { saveApiKey } from "../secrets/secretStore.js";
 
 const CONFIG_DIR = path.join(process.cwd(), "data");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+const CONFIG_PATH_LOCAL = path.join(CONFIG_DIR, "config.local.json");
+const CONFIG_PATH_EXAMPLE = path.join(CONFIG_DIR, "config.example.json");
+
+const KEYTAR_SERVICE = "ccg-character-generator";
+
+function getReadableConfigPath() {
+  if (fs.existsSync(CONFIG_PATH_LOCAL)) return CONFIG_PATH_LOCAL;
+  if (fs.existsSync(CONFIG_PATH)) return CONFIG_PATH;
+  if (fs.existsSync(CONFIG_PATH_EXAMPLE)) return CONFIG_PATH_EXAMPLE;
+  return null;
+}
+
+function getWritableConfigPath() {
+  if (fs.existsSync(CONFIG_PATH_LOCAL)) return CONFIG_PATH_LOCAL;
+  if (fs.existsSync(CONFIG_PATH)) return CONFIG_PATH;
+  return CONFIG_PATH_LOCAL;
+}
 
 function migrateConfig(raw: any) {
   let changed = false;
@@ -170,7 +187,9 @@ function migrateConfig(raw: any) {
 
 export function loadConfig(): AppConfig {
   try {
-    const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+    const configPath = getReadableConfigPath();
+    if (!configPath) return defaultConfig();
+    const raw = fs.readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(raw);
     const { cfg, changed } = migrateConfig(parsed);
     const next = ConfigSchema.parse(cfg);
@@ -183,23 +202,35 @@ export function loadConfig(): AppConfig {
 
 export function saveConfig(cfg: AppConfig) {
   if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf-8");
+  const target = getWritableConfigPath();
+  fs.writeFileSync(target, JSON.stringify(cfg, null, 2), "utf-8");
 }
 
 export async function migrateSecrets() {
-  if (!fs.existsSync(CONFIG_PATH)) return;
+  const configPath = getReadableConfigPath();
+  if (!configPath || configPath === CONFIG_PATH_EXAMPLE) return;
   try {
-    const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+    const raw = fs.readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(raw);
     const apiKey = parsed?.text?.openaiCompat?.apiKey;
     if (typeof apiKey === "string" && apiKey.trim()) {
       const name = "openaiCompat-default";
-      await saveKey(name, apiKey);
+      await saveApiKey({
+        envVar: "OPENAI_API_KEY",
+        service: KEYTAR_SERVICE,
+        account: name,
+        value: apiKey,
+        preferKeytar: true,
+        writeToConfig: (value) => {
+          parsed.secrets = parsed.secrets || {};
+          parsed.secrets.apiKeys = parsed.secrets.apiKeys || {};
+          parsed.secrets.apiKeys[name] = value;
+        },
+      });
       if (!parsed.text) parsed.text = {};
       if (!parsed.text.openaiCompat) parsed.text.openaiCompat = {};
       parsed.text.openaiCompat.apiKeyRef = name;
       delete parsed.text.openaiCompat.apiKey;
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(parsed, null, 2), "utf-8");
     }
 
     const stabilityKey = parsed?.image?.stability?.apiKey;
@@ -208,14 +239,66 @@ export async function migrateSecrets() {
       const name = typeof existingRef === "string" && existingRef.trim()
         ? existingRef.trim()
         : "stability-default";
-      await saveKey(name, stabilityKey);
+      await saveApiKey({
+        envVar: "STABILITY_API_KEY",
+        service: KEYTAR_SERVICE,
+        account: name,
+        value: stabilityKey,
+        preferKeytar: true,
+        writeToConfig: (value) => {
+          parsed.secrets = parsed.secrets || {};
+          parsed.secrets.apiKeys = parsed.secrets.apiKeys || {};
+          parsed.secrets.apiKeys[name] = value;
+        },
+      });
       if (!parsed.image) parsed.image = {};
       if (!parsed.image.stability) parsed.image.stability = {};
       parsed.image.stability.apiKeyRef = name;
       delete parsed.image.stability.apiKey;
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(parsed, null, 2), "utf-8");
     }
+    fs.writeFileSync(configPath, JSON.stringify(parsed, null, 2), "utf-8");
   } catch (e) {
     console.warn("Failed to migrate API keys to keychain.");
   }
+}
+
+export function getApiKeyFromConfig(name: string): string | null {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  try {
+    const cfg = loadConfig();
+    const value = cfg.secrets?.apiKeys?.[trimmed];
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function listApiKeysFromConfig(): string[] {
+  try {
+    const cfg = loadConfig();
+    return Object.keys(cfg.secrets?.apiKeys ?? {}).filter((key) => key.trim());
+  } catch {
+    return [];
+  }
+}
+
+export function setApiKeyInConfig(name: string, value: string) {
+  const trimmed = name?.trim();
+  const secret = value?.trim();
+  if (!trimmed || !secret) return;
+  const cfg = loadConfig();
+  cfg.secrets = cfg.secrets || { apiKeys: {} };
+  cfg.secrets.apiKeys = cfg.secrets.apiKeys || {};
+  cfg.secrets.apiKeys[trimmed] = secret;
+  saveConfig(cfg);
+}
+
+export function deleteApiKeyFromConfig(name: string) {
+  const trimmed = name?.trim();
+  if (!trimmed) return;
+  const cfg = loadConfig();
+  if (!cfg.secrets?.apiKeys?.[trimmed]) return;
+  delete cfg.secrets.apiKeys[trimmed];
+  saveConfig(cfg);
 }

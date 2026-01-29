@@ -1,5 +1,5 @@
-import { loadConfig } from "../../config/store.js";
-import { getKey } from "../../services/keyStore.js";
+import { getApiKeyFromConfig as getApiKeyFromConfigValue, loadConfig } from "../../config/store.js";
+import { readApiKey } from "../../secrets/secretStore.js";
 import type { TextGenParams } from "./koboldcpp.js";
 
 export type Message = { role: "system" | "user" | "assistant"; content: string };
@@ -85,12 +85,13 @@ export async function openaiListModelsWithKey(baseUrl: string, apiKey?: string |
 async function getApiKeyFromConfig() {
   const cfg = loadConfig();
   const keyName = cfg.text.openaiCompat?.apiKeyRef;
-  if (!keyName) return null;
-  const apiKey = await getKey(keyName);
-  if (!apiKey) {
-    throw new Error(`API key not found for "${keyName}".`);
-  }
-  return apiKey;
+  const result = await readApiKey({
+    envVar: "OPENAI_API_KEY",
+    service: "ccg-character-generator",
+    account: keyName ?? "",
+    readFromConfig: () => (keyName ? getApiKeyFromConfigValue(keyName) : null),
+  });
+  return result.value ?? null;
 }
 
 export async function openaiListModels(): Promise<string[]> {

@@ -17,9 +17,11 @@ const keys = ref<Array<{ name: string }>>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const success = ref<string | null>(null);
+const warning = ref<string | null>(null);
 const showAdd = ref(false);
 const newName = ref("");
 const newKey = ref("");
+const storeSecurely = ref(false);
 const testing = ref(false);
 const deleting = ref(false);
 
@@ -45,15 +47,18 @@ async function refreshKeys() {
 async function onSaveKey() {
   error.value = null;
   success.value = null;
+  warning.value = null;
   try {
     const name = newName.value.trim();
     const secret = newKey.value;
-    const res = await saveKey(name, secret);
+    const res = await saveKey(name, secret, storeSecurely.value);
     if (!res.ok) throw new Error(res.error || "Failed to save key.");
     newName.value = "";
     newKey.value = "";
     showAdd.value = false;
-    success.value = "Key saved.";
+    storeSecurely.value = false;
+    success.value = res.storedIn ? `Key saved (${res.storedIn}).` : "Key saved.";
+    if (res.warning) warning.value = res.warning;
     await refreshKeys();
     emit("update:modelValue", name);
   } catch (e: any) {
@@ -140,6 +145,10 @@ onMounted(() => {
         <span>Key</span>
         <input v-model="newKey" type="password" placeholder="sk-..." />
       </label>
+      <label class="checkbox">
+        <input v-model="storeSecurely" type="checkbox" />
+        <span>Store securely (OS keychain)</span>
+      </label>
       <div class="row">
         <button type="button" @click="onSaveKey">Save key</button>
       </div>
@@ -147,6 +156,7 @@ onMounted(() => {
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-else-if="success" class="muted">{{ success }}</p>
+    <p v-if="warning" class="warning">{{ warning }}</p>
   </div>
 </template>
 
@@ -180,8 +190,24 @@ onMounted(() => {
   padding: 12px;
   background: var(--panel-2);
 }
+.checkbox {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+  color: var(--text);
+}
+.checkbox input {
+  width: 16px;
+  height: 16px;
+}
 .error {
   color: #c94a4a;
+  font-weight: 600;
+  margin-top: 6px;
+}
+.warning {
+  color: #c9a94a;
   font-weight: 600;
   margin-top: 6px;
 }
