@@ -9,6 +9,9 @@ let current: AppConfig = loadConfig();
 
 function redactConfig(cfg: AppConfig): AppConfig {
   const next = structuredClone(cfg);
+  if ("secrets" in next) {
+    delete (next as { secrets?: any }).secrets;
+  }
   if (next.text?.openaiCompat && "apiKey" in next.text.openaiCompat) {
     delete (next.text.openaiCompat as { apiKey?: string }).apiKey;
   }
@@ -25,6 +28,7 @@ configRouter.get("/", wrap((req, res) => {
 
 configRouter.put("/", wrap((req, res) => {
   const parsed = ConfigSchema.parse(req.body);
+  parsed.secrets = current.secrets;
   current = parsed;
   saveConfig(current);
   return ok(res, redactConfig(current));

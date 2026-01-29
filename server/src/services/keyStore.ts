@@ -1,4 +1,5 @@
-import keytar from "keytar";
+import { deleteApiKeyFromConfig, getApiKeyFromConfig, listApiKeysFromConfig, setApiKeyInConfig } from "../config/store.js";
+import { deleteKeytarAccount, listKeytarAccounts, readApiKey, saveApiKey } from "../secrets/secretStore.js";
 
 const SERVICE = "ccg-character-generator";
 
@@ -9,27 +10,45 @@ function normalizeName(nameOrId: string) {
 }
 
 export async function listKeys(): Promise<StoredKey[]> {
-  const creds = await keytar.findCredentials(SERVICE);
-  return creds.map((cred) => ({ id: cred.account, name: cred.account }));
+  const [keytarKeys, configKeys] = await Promise.all([
+    listKeytarAccounts(SERVICE),
+    Promise.resolve(listApiKeysFromConfig()),
+  ]);
+  const merged = new Set([...keytarKeys, ...configKeys]);
+  return Array.from(merged).map((name) => ({ id: name, name }));
 }
 
-export async function saveKey(name: string, secret: string): Promise<StoredKey> {
+export async function saveKey(name: string, secret: string, preferKeytar = true): Promise<StoredKey & { storedIn: "keytar" | "config"; warning?: string }> {
   const trimmedName = name.trim();
   const trimmedSecret = secret.trim();
   if (!trimmedName) throw new Error("Key name is required.");
   if (!trimmedSecret) throw new Error("Key value is required.");
-  await keytar.setPassword(SERVICE, trimmedName, trimmedSecret);
-  return { id: trimmedName, name: trimmedName };
+  const result = await saveApiKey({
+    envVar: "",
+    service: SERVICE,
+    account: trimmedName,
+    value: trimmedSecret,
+    preferKeytar,
+    writeToConfig: (value) => setApiKeyInConfig(trimmedName, value),
+  });
+  return { id: trimmedName, name: trimmedName, storedIn: result.storedIn, warning: result.warning };
 }
 
 export async function deleteKey(nameOrId: string): Promise<void> {
   const name = normalizeName(nameOrId);
   if (!name) return;
-  await keytar.deletePassword(SERVICE, name);
+  await deleteKeytarAccount(SERVICE, name);
+  deleteApiKeyFromConfig(name);
 }
 
 export async function getKey(nameOrId: string): Promise<string | null> {
   const name = normalizeName(nameOrId);
   if (!name) return null;
-  return keytar.getPassword(SERVICE, name);
+  const result = await readApiKey({
+    envVar: "",
+    service: SERVICE,
+    account: name,
+    readFromConfig: () => getApiKeyFromConfig(name),
+  });
+  return result.value ?? null;
 }

@@ -116,14 +116,21 @@ You can **Copy/Move** cards between repositories to curate your libraries.
 
 ## Security & API keys
 
- **API key values are never stored in `config.json` or any file in this repo.**  
-Keys are stored securely using **keytar**, which uses your OS credential vault:
+API keys are stored securely using **keytar** when available (OS credential vault):
 
 - Windows: Credential Manager  
 - macOS: Keychain  
 - Linux: Secret Service (may require additional setup depending on distro)
 
-The config only stores a **key reference name** (e.g. `apiKeyRef: "my-hf-key"`), not the secret.
+If keychain access is unavailable (common on Linux/WSL), keys fall back to `server/data/config.local.json` (ignored by git).  
+At runtime, environment variables take precedence over stored keys:
+
+- `OPENAI_API_KEY`
+- `GOOGLE_API_KEY`
+- `STABILITY_API_KEY`
+- `HUGGINGFACE_API_KEY`
+
+The config stores only a **key reference name** (e.g. `apiKeyRef: "my-hf-key"`) unless keytar is unavailable.
 
 ---
 

@@ -213,7 +213,11 @@ export const ConfigSchema = z.object({
         tags: z.enum(["inherit", "short", "detailed", "verbose"]).optional(),
       }).default({}),
     }).default({}),
-  }).default({})
+  }).default({}),
+
+  secrets: z.object({
+    apiKeys: z.record(z.string()).default({}),
+  }).default({ apiKeys: {} }),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;

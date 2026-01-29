@@ -1,5 +1,5 @@
-import { loadConfig } from "../../config/store.js";
-import { getKey } from "../../services/keyStore.js";
+import { getApiKeyFromConfig as getApiKeyFromConfigValue, loadConfig } from "../../config/store.js";
+import { readApiKey } from "../../secrets/secretStore.js";
 import type { Message } from "./openaiCompat.js";
 import type { TextGenParams } from "./koboldcpp.js";
 
@@ -45,10 +45,13 @@ function formatTimeout(providerLabel: string, timeoutMs: number, purpose: string
 async function getApiKeyFromConfig() {
   const cfg = loadConfig();
   const keyName = cfg.text.googleGemini?.apiKeyRef;
-  if (!keyName) return null;
-  const apiKey = await getKey(keyName);
-  if (!apiKey) throw new Error(`API key not found for "${keyName}".`);
-  return apiKey;
+  const result = await readApiKey({
+    envVar: "GOOGLE_API_KEY",
+    service: "ccg-character-generator",
+    account: keyName ?? "",
+    readFromConfig: () => (keyName ? getApiKeyFromConfigValue(keyName) : null),
+  });
+  return result.value ?? null;
 }
 
 export async function geminiListModelsWithKey(apiBaseUrl: string, apiKey?: string | null, timeoutMs = 20_000): Promise<string[]> {
@@ -88,6 +91,7 @@ export async function geminiChatComplete(messages: Message[], params?: TextGenPa
   const cfg = loadConfig();
   const openaiBaseUrl = normalizeBaseUrl(cfg.text.googleGemini?.openaiBaseUrl || "https://generativelanguage.googleapis.com/v1beta/openai/");
   const apiKey = await getApiKeyFromConfig();
+  if (!apiKey) throw new Error("No Google Gemini API key configured.");
   const requestTimeoutMs = cfg.text.googleGemini?.requestTimeoutMs ?? 10 * 60_000;
 
   let chosenModel = cfg.text.googleGemini?.model;

@@ -48,9 +48,17 @@ coverage/
 server/output/
 server/output/**
 # user library + indexes + local config (paths, key references, etc.)
-server/data/
+server/data/**
+!server/data/
+!server/data/config.example.json
 # if you want to keep non-sensitive seed data, add exceptions like:
 # !server/data/README.md
+server/data/config.local.json
+server/data/config.json
+
+# local config copies (if added elsewhere)
+config.local.json
+server/config.local.json
 
 # -------------------------
 # Optional: runtime caches
