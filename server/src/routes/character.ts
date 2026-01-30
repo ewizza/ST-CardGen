@@ -205,6 +205,12 @@ function effectiveNegativePrompt(cfg: ReturnType<typeof loadConfig>, contentRati
   return configured && configured.length ? configured : defaultNegativePrompt(contentRating);
 }
 
+function structuredParams(cfg: ReturnType<typeof loadConfig>) {
+  const sj = cfg.generation?.structuredJson;
+  if (!sj?.enabled) return undefined;
+  return { temperature: sj.temperature, top_p: sj.top_p };
+}
+
 // POST /api/character/generate
 characterRouter.post("/generate", wrap(async (req, res) => {
   const rawLimit = 8000;
@@ -227,7 +233,7 @@ characterRouter.post("/generate", wrap(async (req, res) => {
       { contentRating, fieldDetail, useDefaultNegativePrompt: useDefaultNeg }
     );
 
-    raw = await generateText("", prompt);
+    raw = await generateText("", prompt, structuredParams(cfg));
     const character = parseCharacterResponse(raw);
     if (useDefaultNeg) {
       character.negative_prompt = neg;
@@ -266,7 +272,7 @@ characterRouter.post("/fill-missing", wrap(async (req, res) => {
       { fieldDetail }
     );
 
-    const raw = await generateText("", prompt);
+    const raw = await generateText("", prompt, structuredParams(cfg));
     const parsed = tryParseJson(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", { raw: raw.slice(0, 8000) });
@@ -314,7 +320,7 @@ characterRouter.post("/image-prompt", wrap(async (req, res) => {
       useDefaultNegativePrompt: useDefaultNeg,
     });
 
-    const raw = await generateText("", prompt);
+    const raw = await generateText("", prompt, structuredParams(cfg));
     const parsed = tryParseJson(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", { raw: raw.slice(0, 8000) });
@@ -365,8 +371,12 @@ characterRouter.post("/regenerate", wrap(async (req, res) => {
     }
 
     let lastFiltered: Record<string, any> = {};
+    let lastRaw: string | null = null;
+    let parsedOk = false;
     const maxTokens = body.maxTokens;
-    const regenParams = maxTokens ? { max_tokens: maxTokens } : undefined;
+    const baseParams = structuredParams(cfg) ?? {};
+    const regenParams = { ...baseParams, ...(maxTokens ? { max_tokens: maxTokens } : {}) };
+    const regenParamsOrUndefined = Object.keys(regenParams).length ? regenParams : undefined;
     const fieldDetail = cfg.generation?.fieldDetail;
     for (let attempt = 0; attempt < 3; attempt++) {
       const prompt = buildRegeneratePrompt(
@@ -383,20 +393,19 @@ characterRouter.post("/regenerate", wrap(async (req, res) => {
         { fieldDetail }
       );
 
-      const raw = await generateText("", prompt, regenParams);
+      const raw = await generateText("", prompt, regenParamsOrUndefined);
+      lastRaw = raw;
       const parsed = tryParseJson(raw);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", { raw: raw.slice(0, 8000) });
+        continue;
       }
 
       const validated = RegeneratePatchSchema.safeParse(parsed);
       if (!validated.success) {
-        return fail(res, 502, "PROVIDER_BAD_RESPONSE", "LLM JSON did not match patch schema", {
-          issues: validated.error.issues,
-          raw: raw.slice(0, 8000),
-        });
+        continue;
       }
 
+      parsedOk = true;
       const filtered = filterPatchToTargets(validated.data, filteredTargets);
       lastFiltered = filtered;
       const anyDifferent = filteredTargets.some((key) => {
@@ -418,6 +427,11 @@ characterRouter.post("/regenerate", wrap(async (req, res) => {
 
     if (wantsNegativePrompt) {
       lastFiltered.negative_prompt = neg;
+    }
+    if (!parsedOk) {
+      return fail(res, 502, "PROVIDER_BAD_RESPONSE", "Invalid JSON from LLM", {
+        raw: (lastRaw ?? "").slice(0, 8000),
+      });
     }
     return ok(res, { patch: lastFiltered });
   } catch (e: any) {
