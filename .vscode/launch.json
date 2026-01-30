@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Server (tsx watch)",
+      "type": "pwa-node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/server",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--inspect=9229",
+        "--enable-source-maps",
+        "./node_modules/tsx/dist/cli.mjs",
+        "watch",
+        "src/index.ts"
+      ],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
