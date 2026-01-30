@@ -16,6 +16,81 @@ const TAGS = [
 
 const TAG_SET = new Set(TAGS);
 
+function extractLikelyJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  return text.slice(start, end + 1).trim();
+}
+
+function escapeNewlinesInJsonStrings(text: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+
+    if (escaped) {
+      out += c;
+      escaped = false;
+      continue;
+    }
+
+    if (inString) {
+      if (c === "\\") {
+        out += c;
+        escaped = true;
+        continue;
+      }
+      if (c === "\"") {
+        out += c;
+        inString = false;
+        continue;
+      }
+
+      // Normalize literal CR/LF inside strings into \n
+      if (c === "\r") {
+        // swallow \r (and let \n handle on next char if present)
+        continue;
+      }
+      if (c === "\n") {
+        out += "\\n";
+        continue;
+      }
+
+      out += c;
+      continue;
+    }
+
+    // not in string
+    if (c === "\"") {
+      out += c;
+      inString = true;
+      continue;
+    }
+
+    out += c;
+  }
+
+  return out;
+}
+
+function stripTrailingCommas(text: string): string {
+  return text.replace(/,\s*([}\]])/g, "$1");
+}
+
+function repairJsonCandidate(text: string): string {
+  // 1) slice most likely object if extra text exists
+  const obj = extractLikelyJsonObject(text) ?? text;
+
+  // 2) escape multiline strings
+  const escaped = escapeNewlinesInJsonStrings(obj);
+
+  // 3) strip trailing commas
+  return stripTrailingCommas(escaped).trim();
+}
+
 export function extractJsonBlock(raw: string): string | null {
   const match = raw.match(/```json\s*([\s\S]*?)```/i);
   return match ? match[1].trim() : null;
@@ -31,6 +106,11 @@ export function tryParseJson(raw: string): any | null {
     if (!candidate) continue;
     try {
       return JSON.parse(candidate);
+    } catch {
+      // try repair
+    }
+    try {
+      return JSON.parse(repairJsonCandidate(candidate));
     } catch {
       // try next candidate
     }
@@ -104,7 +184,7 @@ export function parseCharacterResponse(raw: string): CharacterGen {
   if (json) {
     const validated = CharacterGenSchema.safeParse(json);
     if (!validated.success) {
-      throw new Error("LLM JSON did not match schema");
+      throw new Error(`LLM JSON did not match schema: ${validated.error.issues[0]?.message ?? "invalid"}`);
     }
     return validated.data;
   }
