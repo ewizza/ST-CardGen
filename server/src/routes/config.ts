@@ -5,8 +5,6 @@ import { ok, wrap } from "../lib/api.js";
 
 export const configRouter = Router();
 
-let current: AppConfig = loadConfig();
-
 function redactConfig(cfg: AppConfig): AppConfig {
   const next = structuredClone(cfg);
   if ("secrets" in next) {
@@ -22,14 +20,15 @@ function redactConfig(cfg: AppConfig): AppConfig {
 }
 
 configRouter.get("/", wrap((req, res) => {
-  current = loadConfig();
-  return ok(res, redactConfig(current));
+  const cfg = loadConfig();
+  return ok(res, redactConfig(cfg));
 }));
 
 configRouter.put("/", wrap((req, res) => {
+  const existing = loadConfig();
   const parsed = ConfigSchema.parse(req.body);
-  parsed.secrets = current.secrets;
-  current = parsed;
-  saveConfig(current);
-  return ok(res, redactConfig(current));
+  // Preserve secrets from latest on disk so /api/keys can’t be clobbered by a stale config save.
+  parsed.secrets = existing.secrets;
+  saveConfig(parsed);
+  return ok(res, redactConfig(parsed));
 }));
