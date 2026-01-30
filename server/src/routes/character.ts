@@ -4,8 +4,9 @@ import { z } from "zod";
 
 import { generateText } from "../adapters/text/provider.js";
 import { loadConfig } from "../config/store.js";
-import { buildCharacterGenPrompt, buildFillMissingPrompt, buildImagePrompt, buildRegeneratePrompt } from "../domain/character/prompt.js";
-import { parseCharacterResponse, tryParseJson } from "../domain/character/parse.js";
+import { buildCharacterGenPrompt, buildCharacterGenPromptTagged, buildFillMissingPrompt, buildImagePrompt, buildRegeneratePrompt } from "../domain/character/prompt.js";
+import { classifyRawFailure, parseCharacterResponse, parseTaggedSections, tryParseJson } from "../domain/character/parse.js";
+import { CharacterGenSchema } from "../domain/character/schema.js";
 import { fail, ok, wrap } from "../lib/api.js";
 
 export const characterRouter = Router();
@@ -205,6 +206,31 @@ function effectiveNegativePrompt(cfg: ReturnType<typeof loadConfig>, contentRati
   return configured && configured.length ? configured : defaultNegativePrompt(contentRating);
 }
 
+function structuredParams(cfg: ReturnType<typeof loadConfig>) {
+  const sj = cfg.generation?.structuredJson;
+  if (!sj?.enabled) return undefined;
+  return { temperature: sj.temperature, top_p: sj.top_p };
+}
+
+function characterFromTags(map: Record<string, string>) {
+  return {
+    name: (map.NAME ?? "").trim(),
+    description: (map.DESCRIPTION ?? "").trim(),
+    personality: (map.PERSONALITY ?? "").trim(),
+    scenario: (map.SCENARIO ?? "").trim(),
+    first_mes: (map.FIRST_MESSAGE ?? "").trim(),
+    mes_example: (map.EXAMPLE_MESSAGES ?? "").trim(),
+    tags: (map.TAGS ?? "")
+      .split(/,|\n/)
+      .map((t) => t.trim())
+      .filter(Boolean),
+    creator_notes: (map.CREATOR_NOTES ?? "").trim(),
+    image_prompt: (map.IMAGE_PROMPT ?? "").trim(),
+    negative_prompt: (map.NEGATIVE_PROMPT ?? "").trim(),
+    pov: (map.POV ?? "third").trim().toLowerCase(),
+  };
+}
+
 // POST /api/character/generate
 characterRouter.post("/generate", wrap(async (req, res) => {
   const rawLimit = 8000;
@@ -216,25 +242,80 @@ characterRouter.post("/generate", wrap(async (req, res) => {
     const useDefaultNeg = cfg.image?.negativePrompt?.useDefault !== false;
     const neg = effectiveNegativePrompt(cfg, contentRating);
     const fieldDetail = cfg.generation?.fieldDetail;
-    const prompt = buildCharacterGenPrompt(
-      {
-        idea: body.idea,
-        name: body.name,
-        pov: body.pov,
-        lorebook: body.lorebook,
-        outputLanguage: body.outputLanguage,
-      },
-      { contentRating, fieldDetail, useDefaultNegativePrompt: useDefaultNeg }
-    );
+    const formats: Array<"json" | "tags"> = ["json", "tags", "tags"];
+    let lastRaw: string | null = null;
+    let lastReason: string | null = null;
 
-    raw = await generateText("", prompt);
-    const character = parseCharacterResponse(raw);
-    if (useDefaultNeg) {
-      character.negative_prompt = neg;
-    } else if (!character.negative_prompt?.trim()) {
-      character.negative_prompt = neg;
+    for (const format of formats) {
+      const prompt = format === "json"
+        ? buildCharacterGenPrompt(
+            {
+              idea: body.idea,
+              name: body.name,
+              pov: body.pov,
+              lorebook: body.lorebook,
+              outputLanguage: body.outputLanguage,
+            },
+            { contentRating, fieldDetail, useDefaultNegativePrompt: useDefaultNeg }
+          )
+        : buildCharacterGenPromptTagged(
+            {
+              idea: body.idea,
+              name: body.name,
+              pov: body.pov,
+              lorebook: body.lorebook,
+              outputLanguage: body.outputLanguage,
+            },
+            { contentRating, fieldDetail, useDefaultNegativePrompt: useDefaultNeg }
+          );
+
+      raw = await generateText("", prompt, structuredParams(cfg));
+      lastRaw = raw;
+
+      if (format === "json") {
+        try {
+          const character = parseCharacterResponse(raw);
+          if (useDefaultNeg) {
+            character.negative_prompt = neg;
+          } else if (!character.negative_prompt?.trim()) {
+            character.negative_prompt = neg;
+          }
+          return ok(res, { character });
+        } catch (e: any) {
+          const message = String(e?.message ?? e);
+          lastReason = message.includes("did not match schema")
+            ? "schema_mismatch"
+            : classifyRawFailure(raw);
+          continue;
+        }
+      }
+
+      const sections = parseTaggedSections(raw);
+      if (!Object.keys(sections).length) {
+        lastReason = classifyRawFailure(raw);
+        continue;
+      }
+
+      const built = characterFromTags(sections);
+      const validated = CharacterGenSchema.safeParse(built);
+      if (!validated.success) {
+        lastReason = "schema_mismatch";
+        continue;
+      }
+
+      const character = validated.data;
+      if (useDefaultNeg) {
+        character.negative_prompt = neg;
+      } else if (!character.negative_prompt?.trim()) {
+        character.negative_prompt = neg;
+      }
+      return ok(res, { character });
     }
-    return ok(res, { character });
+
+    return fail(res, 502, "PROVIDER_BAD_RESPONSE", "LLM returned invalid or incomplete structured output after retries", {
+      reason: lastReason ?? "unknown",
+      raw: (lastRaw ?? "").slice(0, rawLimit),
+    });
   } catch (e: any) {
     if (e instanceof z.ZodError) throw e;
     const message = String(e?.message ?? e);
