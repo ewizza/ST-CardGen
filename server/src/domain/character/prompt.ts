@@ -123,6 +123,120 @@ export function buildCharacterGenPrompt(
   ].join("\n");
 }
 
+export function buildCharacterGenPromptTagged(
+  input: CharacterGenInput,
+  options: {
+    contentRating: "sfw" | "nsfw_allowed";
+    fieldDetail?: FieldDetailSettings;
+    useDefaultNegativePrompt?: boolean;
+  }
+) {
+  const nameLine = input.name?.trim()
+    ? `Preferred name: ${input.name.trim()}`
+    : "Preferred name: (invent a fitting name)";
+  const loreLine = input.lorebook?.trim()
+    ? `Lorebook:\n${input.lorebook.trim()}`
+    : "Lorebook: (none)";
+  const lang = normalizeOutputLanguage(input.outputLanguage);
+
+  const useDefaultNegativePrompt = options.useDefaultNegativePrompt === true;
+
+  return [
+    "You are generating a SillyTavern character card.",
+    "Return ONLY the tagged template below. No JSON, no markdown, no commentary.",
+    "Rules:",
+    ...(lang ? [
+      "LANGUAGE REQUIREMENT (CRITICAL):",
+      `- Write ALL field values in ${lang} (do not mix languages).`,
+      "- Keep proper names as names, but everything else must be in the selected language.",
+      "- Avoid English filler words (e.g., 'but', 'and', 'so') in non-English text.",
+      "- Always write image_prompt and negative_prompt in English.",
+      "",
+    ] : []),
+    "- Use the exact tag names shown in the template.",
+    "- Use standard JSON escaping for newlines (\\n) if you must include newlines.",
+    "- tags must be a comma-separated list of short strings.",
+    "- image_prompt must be a concise, detailed portrait prompt for the avatar.",
+    "- image_prompt: English, exactly ONE paragraph, 350â€“500 characters max, no newlines.",
+    ...(useDefaultNegativePrompt ? [
+      "- negative_prompt will be supplied by the app, but still include the tag with an empty value.",
+    ] : [
+      "- negative_prompt should list what to avoid.",
+      "- negative_prompt: English, single line, comma-separated phrases, 200â€“300 characters max, no newlines.",
+    ]),
+    "- If you exceed limits, rewrite shorter before responding.",
+    "- Do not use quotes or markdown in image_prompt/negative_prompt.",
+    "- mes_example must use {{user}} and {{char}} labels.",
+    options.contentRating === "sfw"
+      ? "Content rating: SFW only. Keep content safe and avoid sexual content."
+      : "Content rating: NSFW allowed. Do not add safety constraints unless requested; focus negative_prompt on quality/artifacts.",
+    ...(useDefaultNegativePrompt
+      ? []
+      : [
+          options.contentRating === "sfw"
+            ? "- negative_prompt must include nudity and explicit sexual content to avoid."
+            : "- negative_prompt should focus on quality/artifacts unless the user requests otherwise.",
+        ]),
+    "POV rules for first_mes:",
+    "- first: {{char}} speaks in first person.",
+    "- second: address {{user}} in second person without controlling their actions.",
+    "- third: write in third person, acknowledge {{user}} presence without controlling them.",
+    "",
+    "FIELD LENGTH & STRUCTURE PRESET (MANDATORY):",
+    ...buildFieldDetailLines(options.fieldDetail, [
+      "description",
+      "personality",
+      "scenario",
+      "first_mes",
+      "mes_example",
+      "creator_notes",
+      "tags",
+    ] as FieldKey[]),
+    "",
+    "FIRST MESSAGE (first_mes) QUALITY BAR (MANDATORY):",
+    "- first_mes MUST read like the opening of a story scene, not a greeting.",
+    "- Length & structure: follow the Field Length preset above for first_mes.",
+    "- Start in medias res with concrete sensory detail and immediate context (place/time/weather/sounds).",
+    "- Show {{char}} doing something *right now* (actions, body language, small beats) before/around dialogue.",
+    "- Include at least ONE spoken line from {{char}} (quoted dialogue).",
+    "- Acknowledge {{user}}â€™s presence naturally, but DO NOT narrate {{user}}â€™s thoughts, feelings, or decisions.",
+    "- You MAY establish a minimal premise for {{user}} entering the scene (arriving, noticing, standing there),",
+    "  but do not force choices or internal monologue onto {{user}}.",
+    "- End with a HOOK that demands a response (a question, an urgent request, a reveal, or an interrupting event).",
+    "- Avoid generic openers like: 'Greetings', 'Hello', 'How may I help', 'Welcome'.",
+    "- Do not include meta commentary (no 'as an AI', no writing notes).",
+    "",
+    "Template (fill in each section; keep blank lines between sections):",
+    "#NAME#",
+    "",
+    "#DESCRIPTION#",
+    "",
+    "#PERSONALITY#",
+    "",
+    "#SCENARIO#",
+    "",
+    "#FIRST_MESSAGE#",
+    "",
+    "#EXAMPLE_MESSAGES#",
+    "",
+    "#TAGS#",
+    "",
+    "#CREATOR_NOTES#",
+    "",
+    "#IMAGE_PROMPT#",
+    "",
+    "#NEGATIVE_PROMPT#",
+    "",
+    "#POV#",
+    "",
+    "Input:",
+    `Idea: ${input.idea.trim()}`,
+    nameLine,
+    `POV: ${input.pov}`,
+    loreLine,
+  ].join("\n");
+}
+
 type FillMissingInput = {
   card: Record<string, any>;
   missingKeys: string[];

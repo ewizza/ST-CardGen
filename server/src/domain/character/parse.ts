@@ -38,6 +38,13 @@ export function tryParseJson(raw: string): any | null {
   return null;
 }
 
+export function classifyRawFailure(raw: string): "truncated" | "invalid_json" | "schema_mismatch" | "unknown" {
+  const t = raw.trim();
+  if (t.startsWith("{") && !t.includes("}")) return "truncated";
+  if (t.startsWith("{") && !t.endsWith("}")) return "truncated";
+  return "invalid_json";
+}
+
 export function parseTaggedSections(raw: string): Record<string, string> {
   const map: Record<string, string> = {};
   let current: string | null = null;
@@ -104,7 +111,7 @@ export function parseCharacterResponse(raw: string): CharacterGen {
   if (json) {
     const validated = CharacterGenSchema.safeParse(json);
     if (!validated.success) {
-      throw new Error("LLM JSON did not match schema");
+      throw new Error("LLM response parsed but did not match schema");
     }
     return validated.data;
   }
