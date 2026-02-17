@@ -9,9 +9,13 @@
   "scripts": {
     "dev": "concurrently -n server,web -c yellow,cyan \"npm run -w server dev\" \"npm run -w frontend dev\"",
     "build": "npm run -w frontend build && npm run -w server build",
-    "start": "npm run -w server start"
+    "start": "npm run -w server start",
+    "test": "npm run test --workspaces",
+    "test:frontend": "npm run test -w frontend",
+    "test:server": "npm run test -w server"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
     "concurrently": "^9.1.0"
   }
 }

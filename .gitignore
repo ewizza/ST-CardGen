@@ -70,3 +70,7 @@ tmp/
 
 # Optional: if you ever add logs
 server/logs/
+
+# Environment variables
+.env
+.env.local

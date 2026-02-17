@@ -203,3 +203,46 @@ Max Tokens
 Request timeout
 
 Verbose presets and longer fields will require higher values depending on your provider/model.
+
+---
+
+## Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+npm test
+
+# Run frontend tests only
+npm run test:frontend
+
+# Run backend tests only
+npm run test:server
+
+# Run tests with UI
+npm run test:ui -w frontend
+```
+
+## Docker Deployment
+
+Build and run with Docker:
+
+```bash
+# Build image
+docker build -t st-cardgen .
+
+# Run container
+docker run -p 3001:3001 st-cardgen
+
+# Or use docker-compose
+docker-compose up -d
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+## Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation.
