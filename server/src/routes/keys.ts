@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { loadConfig } from "../config/store.js";
-import { listKeys, saveKey, deleteKey, getKey } from "../services/keyStore.js";
+import { listKeys, saveKey, deleteKey, getKeyWithMeta } from "../services/keyStore.js";
 import { openaiPingWithKey } from "../adapters/text/openaiCompat.js";
 import { geminiListModelsWithKey } from "../adapters/text/googleGemini.js";
 import { fail, ok, wrap } from "../lib/api.js";
@@ -41,7 +41,8 @@ keysRouter.post("/validate", wrap(async (req, res) => {
     return fail(res, 400, "VALIDATION_ERROR", "Provider and keyName are required.");
   }
 
-  const apiKey = await getKey(keyName);
+  const key = await getKeyWithMeta(keyName);
+  const apiKey = key.value;
   if (!apiKey) {
     return fail(res, 404, "NOT_FOUND", "API key not found.");
   }
@@ -54,7 +55,7 @@ keysRouter.post("/validate", wrap(async (req, res) => {
     try {
       const isOk = await openaiPingWithKey(baseUrl, apiKey, listTimeoutMs);
       if (!isOk) return fail(res, 401, "AUTH_INVALID", "Provider rejected credentials");
-      return ok(res);
+      return ok(res, { storedIn: key.storedIn, warning: key.warning });
     } catch (e: any) {
       return fail(res, 502, "PROVIDER_ERROR", String(e?.message ?? e));
     }
@@ -68,7 +69,7 @@ keysRouter.post("/validate", wrap(async (req, res) => {
     try {
       const models = await geminiListModelsWithKey(apiBaseUrl, apiKey, listTimeoutMs);
       if (!models.length) return fail(res, 401, "AUTH_INVALID", "Provider rejected credentials");
-      return ok(res);
+      return ok(res, { storedIn: key.storedIn, warning: key.warning });
     } catch (e: any) {
       return fail(res, 502, "PROVIDER_ERROR", String(e?.message ?? e));
     }

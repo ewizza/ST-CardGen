@@ -1,5 +1,5 @@
 import { deleteApiKeyFromConfig, getApiKeyFromConfig, listApiKeysFromConfig, setApiKeyInConfig } from "../config/store.js";
-import { deleteKeytarAccount, listKeytarAccounts, readApiKey, saveApiKey } from "../secrets/secretStore.js";
+import { deleteKeytarAccount, listKeytarAccounts, readApiKey, saveApiKey, secureStoreStatus } from "../secrets/secretStore.js";
 
 const SERVICE = "ccg-character-generator";
 
@@ -41,14 +41,25 @@ export async function deleteKey(nameOrId: string): Promise<void> {
   deleteApiKeyFromConfig(name);
 }
 
-export async function getKey(nameOrId: string): Promise<string | null> {
+export async function getKeyWithMeta(nameOrId: string): Promise<{ value: string | null; storedIn: "env" | "keytar" | "config" | "none"; warning?: string }> {
   const name = normalizeName(nameOrId);
-  if (!name) return null;
+  if (!name) return { value: null, storedIn: "none" };
   const result = await readApiKey({
     envVar: "",
     service: SERVICE,
     account: name,
     readFromConfig: () => getApiKeyFromConfig(name),
   });
-  return result.value ?? null;
+  if (result.storedIn === "config") {
+    const secure = await secureStoreStatus();
+    if (!secure.available) {
+      return { value: result.value ?? null, storedIn: result.storedIn, warning: secure.warning };
+    }
+  }
+  return { value: result.value ?? null, storedIn: result.storedIn };
+}
+
+export async function getKey(nameOrId: string): Promise<string | null> {
+  const result = await getKeyWithMeta(nameOrId);
+  return result.value;
 }

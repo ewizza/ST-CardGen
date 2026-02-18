@@ -139,6 +139,14 @@ export async function listKeytarAccounts(service: string): Promise<string[]> {
   }
 }
 
+export async function secureStoreStatus(): Promise<{ available: boolean; warning?: string }> {
+  const keytar = await loadKeytar();
+  if (!keytar) {
+    return { available: false, warning: formatKeytarWarning() };
+  }
+  return { available: true };
+}
+
 export async function deleteKeytarAccount(service: string, account: string): Promise<void> {
   const name = normalize(account || "");
   if (!name) return;

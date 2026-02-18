@@ -90,10 +90,12 @@ async function onTestKey() {
   testing.value = true;
   error.value = null;
   success.value = null;
+  warning.value = null;
   try {
     const res = await validateKey(props.provider, selected.value);
     if (!res.ok) throw new Error(res.error || "Key validation failed.");
-    success.value = "Key validated.";
+    success.value = res.storedIn ? `Key validated (${res.storedIn}).` : "Key validated.";
+    if (res.warning) warning.value = res.warning;
   } catch (e: any) {
     error.value = String(e?.message ?? e);
   } finally {
@@ -149,6 +151,9 @@ onMounted(() => {
         <input v-model="storeSecurely" type="checkbox" />
         <span>Store securely (OS keychain)</span>
       </label>
+      <p class="muted compact">
+        If secure storage is unavailable (e.g., keytar/libsecret), the backend falls back to config file storage and returns a warning.
+      </p>
       <div class="row">
         <button type="button" @click="onSaveKey">Save key</button>
       </div>
@@ -213,6 +218,10 @@ onMounted(() => {
 }
 .muted {
   color: var(--muted);
+}
+.compact {
+  margin: -2px 0 4px;
+  font-size: 12px;
 }
 button {
   padding: 8px 12px;

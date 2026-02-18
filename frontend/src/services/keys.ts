@@ -21,6 +21,8 @@ export type KeyDeleteResponse = {
 
 export type KeyValidateResponse = {
   ok: boolean;
+  storedIn?: "env" | "keytar" | "config" | "none";
+  warning?: string;
   error?: string;
 };
 
