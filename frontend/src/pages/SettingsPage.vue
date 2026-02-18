@@ -230,11 +230,7 @@ const geminiKeyRef = computed({
   },
 });
 
-const activeKeyRef = computed(() => {
-  if (textProvider.value === "openai_compat") return apiKeyRef.value;
-  if (textProvider.value === "google_gemini") return geminiKeyRef.value;
-  return "";
-});
+// activeKeyRef used to auto-save key ref changes; removed to make saving consistent/explicit.
 
 const geminiApiBaseUrl = computed({
   get: () => cfg.config?.text.googleGemini.apiBaseUrl ?? "",
@@ -325,7 +321,7 @@ const textRequestTimeoutSec = computed<number>({
   },
 });
 
-async function refreshTextModels() {
+async function doRefreshTextModels() {
   modelsError.value = null;
   modelsLoading.value = true;
   try {
@@ -343,7 +339,7 @@ async function refreshTextModels() {
   }
 }
 
-async function pingText() {
+async function doPingText() {
   pingError.value = null;
   pingStatus.value = null;
   try {
@@ -356,11 +352,41 @@ async function pingText() {
   }
 }
 
+async function refreshTextModels() {
+  // The backend reads config from disk, so make sure the user's latest Settings are persisted first.
+  textError.value = null;
+  try {
+    ensureTextDefaults();
+    await cfg.save();
+  } catch (e: any) {
+    textError.value = String(e?.message ?? e);
+    return;
+  }
+  await doRefreshTextModels();
+}
+
+async function pingText() {
+  // The backend reads config from disk, so make sure the user's latest Settings are persisted first.
+  textError.value = null;
+  try {
+    ensureTextDefaults();
+    await cfg.save();
+  } catch (e: any) {
+    textError.value = String(e?.message ?? e);
+    return;
+  }
+  await doPingText();
+}
+
 async function onSaveTextSettings() {
   textError.value = null;
   savingText.value = true;
   try {
+    ensureTextDefaults();
     await cfg.save();
+    // Update status/UI after saving.
+    await doPingText();
+    await doRefreshTextModels();
   } catch (e: any) {
     textError.value = String(e?.message ?? e);
   } finally {
@@ -368,29 +394,25 @@ async function onSaveTextSettings() {
   }
 }
 
-let apiKeyRefReady = false;
 watch(
-  () => activeKeyRef.value,
-  async (value, oldValue) => {
-    if (!cfg.config) return;
-    if (!apiKeyRefReady) {
-      apiKeyRefReady = true;
-      return;
-    }
-    if (value === oldValue) return;
-    await cfg.save();
-  }
+  () => cfg.config,
+  (value) => {
+    if (!value) return;
+    ensureTextDefaults();
+    ensureGenerationDefaults();
+  },
+  { immediate: true }
 );
 
 watch(
   () => textProvider.value,
-  async () => {
-    ensureTextDefaults();
-    await cfg.save();
-    await pingText();
-    await refreshTextModels();
-  },
-  { immediate: true }
+  () => {
+    // Provider switch changes what we ping/list. Clear status so it's obvious a new save is needed.
+    pingStatus.value = null;
+    pingError.value = null;
+    modelsError.value = null;
+    modelOptions.value = [];
+  }
 );
 
 watch(
