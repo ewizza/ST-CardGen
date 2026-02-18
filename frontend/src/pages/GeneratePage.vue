@@ -5,6 +5,7 @@ import { cancelImageJob, generateImage, waitForImageJob, type ImageJob } from "@
 import { resolveImageSrc, withCacheBust } from "@/lib/imageUrl";
 import { useGenerateStore } from "@/stores/generateStore";
 import { useConfigStore } from "@/stores/configStore";
+import { getMissingImageProviderKeyMessage } from "@/lib/imageProviderKey";
 
 const { prompt, negativePrompt, seed } = storeToRefs(useGenerateStore());
 const cfg = useConfigStore();
@@ -38,12 +39,9 @@ async function onGenerate() {
     error.value = "Prompt is required.";
     return;
   }
-  if (cfg.config?.image.provider === "stability" && !cfg.config.image.stability?.apiKeyRef) {
-    error.value = "Select a Stability API key in Settings before generating.";
-    return;
-  }
-  if (cfg.config?.image.provider === "huggingface" && !cfg.config.image.huggingface?.apiKeyRef) {
-    error.value = "Select a Hugging Face API key in Settings before generating.";
+  const missingImageProviderKey = getMissingImageProviderKeyMessage(cfg.config);
+  if (missingImageProviderKey) {
+    error.value = missingImageProviderKey;
     return;
   }
 

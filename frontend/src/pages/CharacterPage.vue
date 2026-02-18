@@ -11,6 +11,7 @@ import { saveToLibrary, updateLibraryItem } from "@/services/library";
 import { resolveImageSrc, withCacheBust } from "@/lib/imageUrl";
 import { useRegenerateStore } from "@/stores/regenerateStore";
 import { useConfigStore } from "@/stores/configStore";
+import { getMissingImageProviderKeyMessage } from "@/lib/imageProviderKey";
 import CollapsiblePanel from "@/components/ui/CollapsiblePanel.vue";
 
 const workspaceStore = useWorkspaceStore();
@@ -102,9 +103,7 @@ const issueText = computed(() =>
   errorIssues.value ? JSON.stringify(errorIssues.value, null, 2) : ""
 );
 
-const missingGoogleKey = computed(
-  () => cfg.config?.image.provider === "google" && !cfg.config.image.google?.apiKeyRef
-);
+const missingImageProviderKey = computed(() => getMissingImageProviderKeyMessage(cfg.config));
 
 const libraryRepos = computed(() => cfg.config?.library?.repositories ?? []);
 const activeLibraryRepoId = computed(() => cfg.config?.library?.activeRepoId || "cardgen");
@@ -331,16 +330,9 @@ async function onGenerateImage() {
     const ok = await onCreateImagePrompt();
     if (!ok) return;
   }
-  if (cfg.config?.image.provider === "stability" && !cfg.config.image.stability?.apiKeyRef) {
-    imageError.value = "Select a Stability API key in Settings before generating.";
-    return;
-  }
-  if (cfg.config?.image.provider === "huggingface" && !cfg.config.image.huggingface?.apiKeyRef) {
-    imageError.value = "Select a Hugging Face API key in Settings before generating.";
-    return;
-  }
-  if (cfg.config?.image.provider === "google" && !cfg.config.image.google?.apiKeyRef) {
-    imageError.value = "Select a Google API key in Settings before generating.";
+  const missingProviderKey = getMissingImageProviderKeyMessage(cfg.config);
+  if (missingProviderKey) {
+    imageError.value = missingProviderKey;
     return;
   }
 
@@ -846,11 +838,11 @@ onUnmounted(() => {
             <div class="actions-title">Image</div>
             <div class="actions-row">
               <button class="btn-ghost" @click="onCreateImagePrompt">Create image prompt</button>
-              <button class="btn-primary" @click="onGenerateImage" :disabled="generatingImage || missingGoogleKey">
+              <button class="btn-primary" @click="onGenerateImage" :disabled="generatingImage || !!missingImageProviderKey">
                 {{ generatingImage ? "Generating image..." : "Generate image" }}
               </button>
             </div>
-            <p v-if="missingGoogleKey" class="alert-error">Select a Google API key in Settings to generate images.</p>
+            <p v-if="missingImageProviderKey" class="alert-error">{{ missingImageProviderKey }}</p>
           </div>
 
           <div class="actions-group">

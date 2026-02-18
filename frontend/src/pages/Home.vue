@@ -4,6 +4,7 @@ import ImageSettingsModal from "@/components/modals/ImageSettingsModal.vue";
 import { cancelImageJob, generateImage, waitForImageJob, type ImageJob } from "@/services/image";
 import { resolveImageSrc, withCacheBust } from "@/lib/imageUrl";
 import { useConfigStore } from "@/stores/configStore";
+import { getMissingImageProviderKeyMessage } from "@/lib/imageProviderKey";
 
 const prompt = ref("a cinematic portrait photo of a medieval ranger, shallow depth of field");
 const negativePrompt = ref("blurry, low quality, deformed, extra fingers");
@@ -39,12 +40,9 @@ async function onGenerate() {
     error.value = "Prompt is required.";
     return;
   }
-  if (cfg.config?.image.provider === "stability" && !cfg.config.image.stability?.apiKeyRef) {
-    error.value = "Select a Stability API key in Settings before generating.";
-    return;
-  }
-  if (cfg.config?.image.provider === "huggingface" && !cfg.config.image.huggingface?.apiKeyRef) {
-    error.value = "Select a Hugging Face API key in Settings before generating.";
+  const missingImageProviderKey = getMissingImageProviderKeyMessage(cfg.config);
+  if (missingImageProviderKey) {
+    error.value = missingImageProviderKey;
     return;
   }
 

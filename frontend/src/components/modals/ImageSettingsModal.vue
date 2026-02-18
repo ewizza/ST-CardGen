@@ -4,6 +4,7 @@ import { comfyModels, comfyLoras } from "@/services/comfyui";
 import { connectImageProvider, listComfyWorkflows } from "@/services/image";
 import { useConfigStore } from "@/stores/configStore";
 import ApiKeySelector from "@/components/ui/ApiKeySelector.vue";
+import { getMissingImageProviderKeyMessage } from "@/lib/imageProviderKey";
 
 const cfg = useConfigStore();
 
@@ -13,6 +14,7 @@ const isStability = computed(() => image.value?.provider === "stability");
 const isHuggingFace = computed(() => image.value?.provider === "huggingface");
 const isGoogle = computed(() => image.value?.provider === "google");
 const providerInfo = computed(() => cfg.config?.image.providerInfo?.[cfg.config?.image.provider]);
+const missingProviderKeyMessage = computed(() => getMissingImageProviderKeyMessage(cfg.config));
 const negativePrompt = computed({
   get: () => {
     if (!cfg.config) return { useDefault: true, defaultText: "" };
@@ -267,7 +269,6 @@ async function connectProvider(provider: "comfyui" | "sdapi" | "koboldcpp" | "st
         }
       }
     }
-    await cfg.save();
   } catch (e: any) {
     const checkedAt = new Date().toISOString();
     const errorText = String(e?.message ?? e);
@@ -280,7 +281,6 @@ async function connectProvider(provider: "comfyui" | "sdapi" | "koboldcpp" | "st
       schedulers: [],
       error: errorText,
     };
-    await cfg.save();
     ssError.value = errorText;
     samplerOptions.value = [];
     schedulerOptions.value = [];
@@ -295,10 +295,11 @@ watch(
     if (!provider || !cfg.config) return;
     samplerOptions.value = [];
     schedulerOptions.value = [];
+    ssWarning.value = null;
+    ssError.value = null;
     ensureBaseUrls();
     if (provider === "stability") {
       ensureStabilitySettings();
-      return;
     }
     if (provider === "huggingface") {
       ensureHuggingFaceSettings();
@@ -316,7 +317,6 @@ watch(
     if (provider === "comfyui") {
       await loadWorkflows();
     }
-    await connectProvider(provider);
   },
   { immediate: true }
 );
@@ -367,6 +367,8 @@ onMounted(() => {
       </button>
       <span class="muted">Checks connectivity + updates status.</span>
     </div>
+
+    <p v-if="missingProviderKeyMessage" class="bad">{{ missingProviderKeyMessage }}</p>
 
     <div v-if="providerInfo" class="row">
       <span :class="providerInfo.ok ? 'muted' : 'bad'">
@@ -590,10 +592,6 @@ onMounted(() => {
           Leave blank to use the built-in default (and content rating will add SFW exclusions automatically).
         </small>
       </label>
-
-      <div class="row">
-        <button @click="save">Save</button>
-      </div>
     </details>
 
     <div v-if="isStability && cfg.config?.image?.stability" class="card2">
@@ -678,8 +676,8 @@ onMounted(() => {
     </div>
 
     <div class="row">
-      <button @click="save">Save</button>
-      <span class="muted">Saved to server/data/config.json</span>
+      <button @click="save">Save Image Settings</button>
+      <span class="muted">Saves provider, model, sampling, and negative prompt settings.</span>
     </div>
   </div>
 </template>

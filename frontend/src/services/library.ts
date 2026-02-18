@@ -14,13 +14,6 @@ export function getLibraryConfig() {
   return httpJson<LibraryConfigResponse>("/api/library/config");
 }
 
-export function setLibraryConfig(dir: string) {
-  return httpJson<LibraryConfigResponse>("/api/library/config", {
-    method: "POST",
-    body: JSON.stringify({ dir }),
-  });
-}
-
 export function saveLibraryConfig(payload: { activeRepoId: string; repositories: LibraryRepo[] }) {
   return httpJson<LibraryConfigResponse>("/api/library/config", {
     method: "POST",
